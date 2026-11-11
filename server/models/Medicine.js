@@ -25,3 +25,4 @@ medicineSchema.virtual('id').get(function() {
 medicineSchema.set('toJSON', { virtuals: true });
 
 module.exports = mongoose.model('Medicine', medicineSchema);
+

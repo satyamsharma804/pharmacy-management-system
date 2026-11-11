@@ -4,6 +4,8 @@ server/node_modules/
 client/dist/
 server/db/pharmacy.db*
 .env
+*.env
+server/.env
 .DS_Store
 Thumbs.db
 

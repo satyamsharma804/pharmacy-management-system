@@ -187,3 +187,4 @@ async function seedIfEmpty() {
 }
 
 module.exports = { connectDB };
+

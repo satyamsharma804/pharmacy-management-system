@@ -15,3 +15,4 @@ supplierSchema.virtual('id').get(function() {
 supplierSchema.set('toJSON', { virtuals: true });
 
 module.exports = mongoose.model('Supplier', supplierSchema);
+

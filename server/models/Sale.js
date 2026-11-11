@@ -37,3 +37,4 @@ saleSchema.virtual('total_items').get(function() {
 saleSchema.set('toJSON', { virtuals: true });
 
 module.exports = mongoose.model('Sale', saleSchema);
+

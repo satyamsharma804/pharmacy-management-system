@@ -15,3 +15,4 @@ customerSchema.virtual('id').get(function() {
 customerSchema.set('toJSON', { virtuals: true });
 
 module.exports = mongoose.model('Customer', customerSchema);
+
