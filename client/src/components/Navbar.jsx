@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { apiRequest } from '../utils/api';
 import { 
@@ -16,6 +16,7 @@ export default function Navbar({ onNavigateAlerts }) {
   const { user, logout } = useAuth();
   const [alerts, setAlerts] = useState({ low_stock: [], expiring_soon: [], total_alerts: 0 });
   const [showAlertMenu, setShowAlertMenu] = useState(false);
+  const alertRef = useRef(null);
 
   useEffect(() => {
     async function loadAlerts() {
@@ -30,6 +31,22 @@ export default function Navbar({ onNavigateAlerts }) {
     const interval = setInterval(loadAlerts, 20000); // refresh every 20s
     return () => clearInterval(interval);
   }, []);
+
+  // Close dropdown when clicking anywhere outside
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (alertRef.current && !alertRef.current.contains(event.target)) {
+        setShowAlertMenu(false);
+      }
+    }
+
+    if (showAlertMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showAlertMenu]);
 
   return (
     <header className="sticky top-0 z-30 flex h-16 w-full items-center justify-between border-b border-slate-200 bg-white/95 px-6 backdrop-blur-md">
@@ -60,8 +77,8 @@ export default function Navbar({ onNavigateAlerts }) {
 
       {/* Right: Notifications & User profile */}
       <div className="flex items-center gap-3">
-        {/* Alerts Bell Dropdown */}
-        <div className="relative">
+        {/* Alerts Bell Dropdown with Click-Outside Detector */}
+        <div ref={alertRef} className="relative">
           <button
             onClick={() => setShowAlertMenu(!showAlertMenu)}
             className="relative flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors"
