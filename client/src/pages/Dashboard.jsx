@@ -308,7 +308,9 @@ export default function Dashboard({ setCurrentTab, onSelectInvoice }) {
                       {sale.payment_method}
                     </span>
                   </div>
-                  <p className="text-[11px] text-slate-500">{sale.customer_name} &bull; {sale.items_count} items</p>
+                  <p className="text-[11px] text-slate-500">
+                    {sale.customer_name} &bull; Cashier: <strong className="text-slate-700 font-semibold">{sale.pharmacist_name || 'Satyam Kumar'}</strong> &bull; {sale.items_count} items
+                  </p>
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="text-xs font-black text-slate-900">{formatCurrency(sale.total_amount)}</span>
