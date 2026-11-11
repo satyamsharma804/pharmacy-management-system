@@ -121,7 +121,7 @@ export default function InvoiceModal({ invoice, onClose }) {
               *** VISIT AGAIN ***
             </div>
             <h1 className="text-base sm:text-lg font-black tracking-wider uppercase text-slate-900">
-              PHARMACAREPRO PHARMACY
+              PHARMACAREPRO PHARMA
             </h1>
             <p className="text-[11px] leading-tight text-slate-700 font-medium">
               Retail Chemist & Druggist &bull; 24x7 Healthcare Services
@@ -280,7 +280,7 @@ export default function InvoiceModal({ invoice, onClose }) {
                   * * * Saved Rs. {Number(totalSavings).toFixed(2)} On MRP * * *
                 </p>
                 <p className="text-[10px] text-emerald-800 font-bold">
-                  Thank You for Shopping at PharmaCarePro Pharmacy!
+                  Thank You for Shopping at PharmaCarePro Pharma!
                 </p>
               </div>
             </div>
