@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { ThemeProvider } from './context/ThemeContext';
 import Navbar from './components/Navbar';
 import Sidebar from './components/Sidebar';
 import Login from './pages/Login';
@@ -52,7 +53,7 @@ function MainApp() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col font-['Plus_Jakarta_Sans',sans-serif]">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-['Plus_Jakarta_Sans',sans-serif] transition-colors duration-200">
       {/* Top Navbar */}
       <Navbar onNavigateAlerts={() => setCurrentTab('inventory')} />
 
@@ -68,16 +69,16 @@ function MainApp() {
       </div>
 
       {/* Persistent Academic Project Footer */}
-      <footer className="border-t border-slate-200 bg-white py-3 px-6 text-center text-xs text-slate-500 flex flex-col sm:flex-row items-center justify-between gap-2">
+      <footer className="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 py-3 px-6 text-center text-xs text-slate-500 dark:text-slate-400 flex flex-col sm:flex-row items-center justify-between gap-2 transition-colors">
         <div className="flex items-center gap-2">
-          <span className="font-bold text-slate-800">PharmaCare Pro</span>
+          <span className="font-bold text-slate-800 dark:text-slate-200">PharmaCare Pro</span>
           <span>&bull;</span>
           <span>Pharmacy & Inventory Management System</span>
         </div>
         <div>
           <span>Academic Assignment for <strong>Full-Stack Web Development</strong></span>
           <span className="mx-2">&bull;</span>
-          <span>Student: <strong className="text-slate-900">Satyam Kumar</strong> (Reg: <strong className="font-mono text-teal-700">12314877</strong>)</span>
+          <span>Student: <strong className="text-slate-900 dark:text-slate-200">Satyam Kumar</strong> (Reg: <strong className="font-mono text-teal-600 dark:text-teal-400">12314877</strong>)</span>
         </div>
       </footer>
     </div>
@@ -86,9 +87,10 @@ function MainApp() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <MainApp />
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <MainApp />
+      </AuthProvider>
+    </ThemeProvider>
   );
 }
-
