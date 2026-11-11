@@ -3,6 +3,7 @@ const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const Sale = require('../models/Sale');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'pharmacy-secret-key-2026-satyam';
 
@@ -115,6 +116,53 @@ router.get('/me', authenticateToken, async (req, res) => {
         phone: user.phone
       }
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/auth/staff - List all staff & cashiers with billing performance metrics (for Admin)
+router.get('/staff', authenticateToken, async (req, res) => {
+  try {
+    const users = await User.find().select('-password').sort({ createdAt: -1 });
+    const sales = await Sale.find().select('pharmacist pharmacist_name total_amount createdAt');
+
+    const staffWithMetrics = users.map(u => {
+      const uId = u._id.toString();
+      const userSales = sales.filter(s => 
+        (s.pharmacist && s.pharmacist.toString() === uId) ||
+        (s.pharmacist_name && s.pharmacist_name.toLowerCase() === u.name.toLowerCase())
+      );
+      
+      const totalSalesCount = userSales.length;
+      const totalRevenue = userSales.reduce((acc, curr) => acc + (curr.total_amount || 0), 0);
+
+      return {
+        id: u._id.toString(),
+        name: u.name,
+        email: u.email,
+        phone: u.phone,
+        role: u.role,
+        createdAt: u.createdAt,
+        total_sales: totalSalesCount,
+        total_revenue: parseFloat(totalRevenue.toFixed(2))
+      };
+    });
+
+    res.json(staffWithMetrics);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/auth/users/:id - Delete a user (Admin only)
+router.delete('/users/:id', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Only administrators can remove staff accounts' });
+    }
+    await User.findByIdAndDelete(req.params.id);
+    res.json({ message: 'User removed successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -81,7 +81,7 @@ export default function InvoiceModal({ invoice, onClose }) {
                 onClick={() => setPaperStyle('dmart')}
                 className={`rounded-md px-2.5 py-1 transition ${paperStyle === 'dmart' ? 'bg-white shadow text-teal-800' : 'text-slate-600 hover:text-slate-900'}`}
               >
-                DMart Thermal Style
+                PharmaCarePro Slip (GST)
               </button>
               <button
                 type="button"
@@ -115,22 +115,22 @@ export default function InvoiceModal({ invoice, onClose }) {
             paperStyle === 'dmart' ? 'max-w-md mx-auto text-xs' : 'text-xs'
           }`}
         >
-          {/* DMart Style Header */}
+          {/* Header */}
           <div className="text-center border-b-2 border-dashed border-slate-400 pb-3">
             <div className="inline-block border-2 border-slate-900 px-2 py-0.5 font-black text-sm tracking-wider uppercase mb-1">
               *** VISIT AGAIN ***
             </div>
             <h1 className="text-base sm:text-lg font-black tracking-wider uppercase text-slate-900">
-              DMART PHARMA & HEALTHCARE
+              PHARMACAREPRO PHARMACY
             </h1>
-            <p className="text-[11px] leading-tight text-slate-700">
-              Khasra No 570 hadbast No 75, Village Chak Hakim,
+            <p className="text-[11px] leading-tight text-slate-700 font-medium">
+              Retail Chemist & Druggist &bull; 24x7 Healthcare Services
             </p>
             <p className="text-[11px] leading-tight text-slate-700">
-              Phagwara, Kapurthala, Punjab 144401
+              Main Market Road, Phagwara, Kapurthala, Punjab 144401
             </p>
             <p className="text-[11px] font-bold text-slate-900 mt-0.5">
-              Phone: 8054035553 | DL No: PB-PHAG-44910
+              Phone: +91 98765 43210 | DL No: PB-PHAG-44910/2026
             </p>
             <p className="text-[11px] text-slate-700">
               GSTIN: 03AAGCD1284P1Z3 (Composite/Regular)
@@ -280,7 +280,7 @@ export default function InvoiceModal({ invoice, onClose }) {
                   * * * Saved Rs. {Number(totalSavings).toFixed(2)} On MRP * * *
                 </p>
                 <p className="text-[10px] text-emerald-800 font-bold">
-                  Thank You for Shopping at PharmaCare / DMart Pharmacy!
+                  Thank You for Shopping at PharmaCarePro Pharmacy!
                 </p>
               </div>
             </div>

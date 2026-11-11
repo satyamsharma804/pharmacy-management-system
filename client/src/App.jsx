@@ -11,10 +11,23 @@ import SalesHistory from './pages/SalesHistory';
 import Customers from './pages/Customers';
 import Suppliers from './pages/Suppliers';
 import Reports from './pages/Reports';
+import StaffManagement from './pages/StaffManagement';
 
 function MainApp() {
   const { user, loading } = useAuth();
-  const [currentTab, setCurrentTab] = useState('dashboard');
+  const isAdmin = user?.role === 'admin';
+  const [currentTab, setCurrentTab] = useState('pos');
+
+  // Set default tab on initial load or user change
+  React.useEffect(() => {
+    if (user) {
+      if (user.role === 'admin') {
+        setCurrentTab('dashboard');
+      } else {
+        setCurrentTab('pos');
+      }
+    }
+  }, [user?.role]);
 
   if (loading) {
     return (
@@ -32,6 +45,11 @@ function MainApp() {
   }
 
   const renderContent = () => {
+    // If not admin and trying to access an admin-only tab, default to POS
+    if (!isAdmin && ['dashboard', 'staff', 'suppliers', 'reports'].includes(currentTab)) {
+      return <POSBilling />;
+    }
+
     switch (currentTab) {
       case 'dashboard':
         return <Dashboard setCurrentTab={setCurrentTab} />;
@@ -43,12 +61,14 @@ function MainApp() {
         return <SalesHistory />;
       case 'customers':
         return <Customers />;
+      case 'staff':
+        return <StaffManagement />;
       case 'suppliers':
         return <Suppliers />;
       case 'reports':
         return <Reports />;
       default:
-        return <Dashboard setCurrentTab={setCurrentTab} />;
+        return isAdmin ? <Dashboard setCurrentTab={setCurrentTab} /> : <POSBilling />;
     }
   };
 

@@ -7,25 +7,55 @@ import {
   Users, 
   Truck, 
   BarChart3,
-  Sparkles
+  Sparkles,
+  UserCheck,
+  ShieldCheck
 } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 
 export default function Sidebar({ currentTab, setCurrentTab }) {
-  const menuItems = [
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
+
+  const menuItems = isAdmin ? [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'pos', label: 'POS Billing', icon: ShoppingCart, highlight: true },
     { id: 'inventory', label: 'Inventory', icon: Pill },
     { id: 'sales', label: 'Sales History', icon: Receipt },
     { id: 'customers', label: 'Customers', icon: Users },
+    { id: 'staff', label: 'Cashiers & Staff', icon: UserCheck },
     { id: 'suppliers', label: 'Suppliers', icon: Truck },
     { id: 'reports', label: 'Reports', icon: BarChart3 },
+  ] : [
+    { id: 'pos', label: 'POS Billing', icon: ShoppingCart, highlight: true },
+    { id: 'inventory', label: 'Inventory (Add / View)', icon: Pill },
+    { id: 'customers', label: 'Customers', icon: Users },
+    { id: 'sales', label: 'Sales History', icon: Receipt },
   ];
 
   return (
     <aside className="w-64 flex-shrink-0 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col justify-between p-4 min-h-[calc(100vh-4rem)] transition-colors">
       <div>
-        <div className="mb-4 px-3 text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-          Main Menu
+        <div className="mb-3 px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/60 flex items-center justify-between">
+          <div className="flex items-center gap-1.5">
+            {isAdmin ? (
+              <ShieldCheck className="h-4 w-4 text-purple-600 dark:text-purple-400" />
+            ) : (
+              <UserCheck className="h-4 w-4 text-teal-600 dark:text-teal-400" />
+            )}
+            <span className="text-[11px] font-bold text-slate-700 dark:text-slate-200 uppercase tracking-wider">
+              {isAdmin ? 'Admin View' : 'Cashier View'}
+            </span>
+          </div>
+          <span className={`text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-md ${
+            isAdmin ? 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300' : 'bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-300'
+          }`}>
+            {user?.role || 'cashier'}
+          </span>
+        </div>
+
+        <div className="mb-2 px-3 text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+          Navigation
         </div>
         <nav className="space-y-1.5">
           {menuItems.map((item) => {
