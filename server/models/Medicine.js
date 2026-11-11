@@ -5,6 +5,9 @@ const medicineSchema = new mongoose.Schema({
   generic_name: { type: String, default: '' },
   category: { type: String, required: true },
   batch_number: { type: String, required: true, unique: true },
+  hsn_code: { type: String, default: '3004' }, // Indian GST HSN code for medicaments
+  gst_rate: { type: Number, default: 12 }, // 0%, 5%, 12%, 18%
+  mrp: { type: Number, default: 0 }, // Maximum Retail Price for savings calculation
   supplier: { type: mongoose.Schema.Types.ObjectId, ref: 'Supplier' },
   supplier_name: { type: String, default: '' },
   purchase_price: { type: Number, default: 0 },

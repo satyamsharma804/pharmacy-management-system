@@ -6,15 +6,24 @@ const Supplier = require('../models/Supplier');
 // GET /api/medicines - List with search & filters
 router.get('/', async (req, res) => {
   try {
-    const { search, category, low_stock, expiring_soon } = req.query;
+    const { search, category, low_stock, expiring_soon, composition, gst_rate } = req.query;
     const filter = {};
 
     if (search) {
       filter.$or = [
         { name: { $regex: search, $options: 'i' } },
         { generic_name: { $regex: search, $options: 'i' } },
-        { batch_number: { $regex: search, $options: 'i' } }
+        { batch_number: { $regex: search, $options: 'i' } },
+        { category: { $regex: search, $options: 'i' } }
       ];
+    }
+
+    if (composition) {
+      filter.generic_name = { $regex: composition, $options: 'i' };
+    }
+
+    if (gst_rate !== undefined && gst_rate !== '') {
+      filter.gst_rate = Number(gst_rate);
     }
 
     if (category && category !== 'All') {
@@ -31,6 +40,55 @@ router.get('/', async (req, res) => {
     }
 
     const medicines = await Medicine.find(filter).sort({ name: 1 });
+    res.json(medicines);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/medicines/substitutes/:id - Find alternative brands with the same generic salt/composition
+router.get('/substitutes/:id', async (req, res) => {
+  try {
+    const medicine = await Medicine.findById(req.params.id);
+    if (!medicine) return res.status(404).json({ error: 'Medicine not found' });
+
+    if (!medicine.generic_name || medicine.generic_name.trim() === '') {
+      return res.json({
+        primary: medicine,
+        composition: '',
+        substitutes: [],
+        message: 'No generic composition defined for this medicine'
+      });
+    }
+
+    // Escape regex special chars in generic_name for accurate matching
+    const escaped = medicine.generic_name.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const substitutes = await Medicine.find({
+      _id: { $ne: medicine._id },
+      generic_name: { $regex: new RegExp(`^${escaped}$`, 'i') }
+    }).sort({ selling_price: 1, quantity: -1 });
+
+    res.json({
+      primary: medicine,
+      composition: medicine.generic_name,
+      strength: medicine.strength,
+      substitutes
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/medicines/by-composition - Search medicines by active generic salt
+router.get('/by-composition', async (req, res) => {
+  try {
+    const { query } = req.query;
+    if (!query) return res.json([]);
+
+    const medicines = await Medicine.find({
+      generic_name: { $regex: query, $options: 'i' }
+    }).sort({ selling_price: 1 });
+
     res.json(medicines);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -89,6 +147,9 @@ router.post('/', async (req, res) => {
       generic_name,
       category,
       batch_number,
+      hsn_code = '3004',
+      gst_rate = 12,
+      mrp,
       supplier_id,
       purchase_price,
       selling_price,
@@ -121,6 +182,9 @@ router.post('/', async (req, res) => {
       generic_name: generic_name || '',
       category,
       batch_number,
+      hsn_code: String(hsn_code || '3004').trim(),
+      gst_rate: Number(gst_rate ?? 12),
+      mrp: Number(mrp || selling_price),
       supplier: supplier_id || null,
       supplier_name: supplierName,
       purchase_price: Number(purchase_price || 0),
@@ -153,16 +217,22 @@ router.put('/:id', async (req, res) => {
       if (sup) supplierName = sup.name;
     }
 
+    const updateData = {
+      ...req.body,
+      supplier_name: supplierName
+    };
+
+    if (req.body.purchase_price !== undefined) updateData.purchase_price = Number(req.body.purchase_price);
+    if (req.body.selling_price !== undefined) updateData.selling_price = Number(req.body.selling_price);
+    if (req.body.mrp !== undefined) updateData.mrp = Number(req.body.mrp);
+    if (req.body.gst_rate !== undefined) updateData.gst_rate = Number(req.body.gst_rate);
+    if (req.body.hsn_code !== undefined) updateData.hsn_code = String(req.body.hsn_code).trim();
+    if (req.body.quantity !== undefined) updateData.quantity = Number(req.body.quantity);
+    if (req.body.min_stock_level !== undefined) updateData.min_stock_level = Number(req.body.min_stock_level);
+
     const updated = await Medicine.findByIdAndUpdate(
       id,
-      {
-        ...req.body,
-        supplier_name: supplierName,
-        purchase_price: Number(req.body.purchase_price ?? medicine.purchase_price),
-        selling_price: Number(req.body.selling_price ?? medicine.selling_price),
-        quantity: Number(req.body.quantity ?? medicine.quantity),
-        min_stock_level: Number(req.body.min_stock_level ?? medicine.min_stock_level)
-      },
+      updateData,
       { new: true }
     );
 

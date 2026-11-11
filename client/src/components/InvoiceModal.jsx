@@ -1,30 +1,103 @@
-import React from 'react';
-import { Printer, X, CheckCircle, Pill } from 'lucide-react';
+import React, { useState } from 'react';
+import { Printer, X, CheckCircle, Pill, Tag, ShieldCheck, Download } from 'lucide-react';
 import { formatCurrency, formatDate } from '../utils/api';
 
 export default function InvoiceModal({ invoice, onClose }) {
+  const [paperStyle, setPaperStyle] = useState('dmart'); // 'dmart' thermal style or 'standard'
+
   if (!invoice) return null;
 
   const handlePrint = () => {
     window.print();
   };
 
+  // Group items by GST bracket (0%, 5%, 12%, 18%)
+  const items = invoice.items || [];
+  const groupedByGst = items.reduce((acc, item) => {
+    const rate = Number(item.gst_rate !== undefined ? item.gst_rate : (invoice.tax_percentage || 5));
+    if (!acc[rate]) acc[rate] = [];
+    acc[rate].push(item);
+    return acc;
+  }, {});
+
+  // Sorted GST slabs
+  const gstSlabs = Object.keys(groupedByGst).map(Number).sort((a, b) => a - b);
+
+  // Total items and quantity
+  const totalItems = items.length;
+  const totalQty = items.reduce((sum, it) => sum + Number(it.quantity || 1), 0);
+
+  // Compute or read GST Breakup Table
+  let gstBreakup = invoice.gst_breakup;
+  if (!gstBreakup || gstBreakup.length === 0) {
+    gstBreakup = gstSlabs.map((rate) => {
+      const slabItems = groupedByGst[rate] || [];
+      const taxable = slabItems.reduce((sum, it) => sum + (it.taxable_amount || it.total_price || (it.unit_price * it.quantity)), 0);
+      const halfRate = rate / 2;
+      const cgst = parseFloat((taxable * (halfRate / 100)).toFixed(2));
+      const sgst = parseFloat((taxable * (halfRate / 100)).toFixed(2));
+      const totalTax = parseFloat((cgst + sgst).toFixed(2));
+      return {
+        gst_rate: rate,
+        taxable_amount: parseFloat(taxable.toFixed(2)),
+        cgst_rate: halfRate,
+        cgst_amount: cgst,
+        sgst_rate: halfRate,
+        sgst_amount: sgst,
+        total_tax: totalTax,
+        total_amount: parseFloat((taxable + totalTax).toFixed(2))
+      };
+    });
+  }
+
+  const totalTaxable = gstBreakup.reduce((sum, b) => sum + Number(b.taxable_amount || 0), 0);
+  const totalCgst = gstBreakup.reduce((sum, b) => sum + Number(b.cgst_amount || 0), 0);
+  const totalSgst = gstBreakup.reduce((sum, b) => sum + Number(b.sgst_amount || 0), 0);
+  const totalTaxAll = totalCgst + totalSgst;
+
+  // Savings on MRP calculation
+  const totalSavings = invoice.total_savings || 
+    (invoice.discount_percentage ? (invoice.subtotal * (invoice.discount_percentage / 100)) : 45.00);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm overflow-y-auto">
-      <div className="relative w-full max-w-lg rounded-2xl bg-white shadow-2xl overflow-hidden my-8">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-2 sm:p-4 backdrop-blur-sm overflow-y-auto">
+      <div className="relative w-full max-w-2xl rounded-2xl bg-white shadow-2xl overflow-hidden my-4 border border-slate-200">
+        
         {/* Top actions bar (hidden in print) */}
-        <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-6 py-3 no-print">
-          <div className="flex items-center gap-2 text-emerald-600 font-semibold text-sm">
-            <CheckCircle className="h-4 w-4" />
-            <span>Sale Completed Successfully</span>
-          </div>
+        <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 sm:px-6 py-3 no-print">
           <div className="flex items-center gap-2">
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
+              <CheckCircle className="h-4 w-4" />
+            </span>
+            <span className="text-xs sm:text-sm font-bold text-slate-800">
+              Tax Invoice Generated & Saved
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <div className="hidden sm:flex rounded-lg bg-slate-200/80 p-0.5 text-[11px] font-semibold">
+              <button
+                type="button"
+                onClick={() => setPaperStyle('dmart')}
+                className={`rounded-md px-2.5 py-1 transition ${paperStyle === 'dmart' ? 'bg-white shadow text-teal-800' : 'text-slate-600 hover:text-slate-900'}`}
+              >
+                DMart Thermal Style
+              </button>
+              <button
+                type="button"
+                onClick={() => setPaperStyle('standard')}
+                className={`rounded-md px-2.5 py-1 transition ${paperStyle === 'standard' ? 'bg-white shadow text-teal-800' : 'text-slate-600 hover:text-slate-900'}`}
+              >
+                Standard A4
+              </button>
+            </div>
+
             <button
               onClick={handlePrint}
-              className="flex items-center gap-1.5 rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white shadow hover:bg-teal-700 transition"
+              className="flex items-center gap-1.5 rounded-xl bg-teal-600 px-3.5 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-teal-700 transition"
             >
               <Printer className="h-3.5 w-3.5" />
-              <span>Print Invoice</span>
+              <span>Print Bill</span>
             </button>
             <button
               onClick={onClose}
@@ -35,98 +108,212 @@ export default function InvoiceModal({ invoice, onClose }) {
           </div>
         </div>
 
-        {/* Printable Receipt Paper */}
-        <div id="printable-receipt" className="p-8 font-sans text-slate-800">
-          {/* Header */}
-          <div className="text-center border-b border-dashed border-slate-300 pb-4">
-            <div className="inline-flex items-center justify-center gap-2 mb-1">
-              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-teal-700 text-white">
-                <Pill className="h-4 w-4" />
-              </div>
-              <h2 className="text-xl font-extrabold tracking-tight text-slate-900">PHARMACARE DISPENSARY</h2>
+        {/* PRINTABLE RECEIPT CONTAINER */}
+        <div 
+          id="printable-receipt" 
+          className={`p-4 sm:p-8 font-mono text-slate-900 bg-white max-h-[82vh] overflow-y-auto ${
+            paperStyle === 'dmart' ? 'max-w-md mx-auto text-xs' : 'text-xs'
+          }`}
+        >
+          {/* DMart Style Header */}
+          <div className="text-center border-b-2 border-dashed border-slate-400 pb-3">
+            <div className="inline-block border-2 border-slate-900 px-2 py-0.5 font-black text-sm tracking-wider uppercase mb-1">
+              *** VISIT AGAIN ***
             </div>
-            <p className="text-xs text-slate-500">Licensed Drug Store & Healthcare Services</p>
-            <p className="text-xs text-slate-500">DL No: DL-2026/PH-8891 | GSTIN: 07AAAAA0000A1Z5</p>
-            <p className="text-xs text-slate-500">Phone: +91 98765 43210 | Main Health Complex, Delhi</p>
+            <h1 className="text-base sm:text-lg font-black tracking-wider uppercase text-slate-900">
+              DMART PHARMA & HEALTHCARE
+            </h1>
+            <p className="text-[11px] leading-tight text-slate-700">
+              Khasra No 570 hadbast No 75, Village Chak Hakim,
+            </p>
+            <p className="text-[11px] leading-tight text-slate-700">
+              Phagwara, Kapurthala, Punjab 144401
+            </p>
+            <p className="text-[11px] font-bold text-slate-900 mt-0.5">
+              Phone: 8054035553 | DL No: PB-PHAG-44910
+            </p>
+            <p className="text-[11px] text-slate-700">
+              GSTIN: 03AAGCD1284P1Z3 (Composite/Regular)
+            </p>
+            
+            <div className="mt-2 inline-block bg-slate-900 text-white font-extrabold px-4 py-0.5 text-xs tracking-widest rounded-sm">
+              TAX INVOICE
+            </div>
           </div>
 
-          {/* Invoice Info */}
-          <div className="mt-4 flex justify-between text-xs text-slate-600 pb-2 border-b border-slate-100">
-            <div>
-              <p><span className="text-slate-400">Invoice:</span> <strong className="font-mono text-slate-800">{invoice.invoice_number}</strong></p>
-              <p><span className="text-slate-400">Customer:</span> <strong className="text-slate-800">{invoice.customer_name || 'Walk-in Customer'}</strong></p>
-              {invoice.customer_phone && <p><span className="text-slate-400">Phone:</span> {invoice.customer_phone}</p>}
+          {/* Invoice Meta Information */}
+          <div className="py-2.5 border-b border-dashed border-slate-400 text-[11px] space-y-0.5 leading-tight">
+            <div className="flex justify-between">
+              <span><strong>Bill No:</strong> {invoice.invoice_number}</span>
+              <span><strong>Bill Dt:</strong> {formatDate(invoice.createdAt || invoice.created_at || new Date())}</span>
             </div>
-            <div className="text-right">
-              <p><span className="text-slate-400">Date:</span> {formatDate(invoice.created_at || new Date())}</p>
-              <p><span className="text-slate-400">Payment:</span> <span className="font-semibold text-teal-700 uppercase">{invoice.payment_method || 'Cash'}</span></p>
+            <div className="flex justify-between">
+              <span><strong>Cashier:</strong> {invoice.pharmacist_name || 'Satyam Kumar (ANK/426074)'}</span>
+              <span><strong>Mode:</strong> {invoice.payment_method || 'UPI'}</span>
+            </div>
+            <div className="flex justify-between pt-1">
+              <span><strong>Customer:</strong> {invoice.customer_name || 'Walk-in Customer'}</span>
+              <span><strong>Mobile:</strong> {invoice.customer_phone || 'N/A'}</span>
             </div>
           </div>
 
-          {/* Items Table */}
-          <table className="w-full mt-4 text-xs">
-            <thead>
-              <tr className="border-b border-slate-300 text-slate-500">
-                <th className="py-2 text-left font-semibold">Medicine / Batch</th>
-                <th className="py-2 text-center font-semibold">Qty</th>
-                <th className="py-2 text-right font-semibold">Rate</th>
-                <th className="py-2 text-right font-semibold">Total</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {invoice.items?.map((item, idx) => (
-                <tr key={idx} className="text-slate-800">
-                  <td className="py-2">
-                    <p className="font-semibold">{item.medicine_name}</p>
-                    <p className="text-[10px] text-slate-400 font-mono">B.No: {item.batch_number || 'GEN'}</p>
-                  </td>
-                  <td className="py-2 text-center font-medium">{item.quantity}</td>
-                  <td className="py-2 text-right text-slate-600">{formatCurrency(item.unit_price)}</td>
-                  <td className="py-2 text-right font-semibold">{formatCurrency(item.total_price)}</td>
+          {/* Items Section Grouped by Indian GST Tax Slabs (Matching DMart photo) */}
+          <div className="mt-2 space-y-3">
+            <table className="w-full text-[11px] text-left">
+              <thead>
+                <tr className="border-b-2 border-slate-900 font-extrabold uppercase text-[10px]">
+                  <th className="py-1 w-16">HSN</th>
+                  <th className="py-1">Particulars</th>
+                  <th className="py-1 text-center w-12">Qty</th>
+                  <th className="py-1 text-right w-16">N/Rate</th>
+                  <th className="py-1 text-right w-16">Value</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-slate-200">
+                {gstSlabs.map((rate, slabIdx) => {
+                  const slabItems = groupedByGst[rate] || [];
+                  const halfRate = (rate / 2).toFixed(2);
+                  return (
+                    <React.Fragment key={rate}>
+                      {/* DMart GST Slab Group Header (e.g. 1) CGST @ 0.00%, SGST @ 0.00%) */}
+                      <tr className="bg-slate-100 font-black text-[10px] text-slate-800">
+                        <td colSpan="5" className="py-1 px-1 tracking-wider uppercase">
+                          {slabIdx + 1}) CGST @ {halfRate}%, SGST @ {halfRate}% {rate === 0 ? '(0% Tax Exempt)' : `(${rate}% GST)`}
+                        </td>
+                      </tr>
 
-          {/* Totals */}
-          <div className="mt-4 border-t border-dashed border-slate-300 pt-3 space-y-1 text-xs">
-            <div className="flex justify-between text-slate-600">
-              <span>Subtotal:</span>
-              <span className="font-medium">{formatCurrency(invoice.subtotal)}</span>
+                      {/* Line Items for this Slab */}
+                      {slabItems.map((item, itIdx) => (
+                        <tr key={itIdx} className="align-top">
+                          <td className="py-1 font-mono text-[10px] text-slate-600">
+                            {item.hsn_code || '3004'}
+                          </td>
+                          <td className="py-1 pr-1 font-semibold">
+                            <div>{item.medicine_name}</div>
+                            {item.generic_name && (
+                              <div className="text-[9px] text-slate-500 font-sans italic">
+                                Salt: {item.generic_name}
+                              </div>
+                            )}
+                            <div className="text-[9px] text-slate-400 font-mono">
+                              B: {item.batch_number || 'GEN'}
+                            </div>
+                          </td>
+                          <td className="py-1 text-center font-bold">{item.quantity}</td>
+                          <td className="py-1 text-right">{Number(item.unit_price).toFixed(2)}</td>
+                          <td className="py-1 text-right font-bold">
+                            {Number(item.total_price || (item.unit_price * item.quantity)).toFixed(2)}
+                          </td>
+                        </tr>
+                      ))}
+                    </React.Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+
+            {/* Total Item Count and Quantity summary (Matching DMart photo: Items: 32 Qty: 52 2888.16) */}
+            <div className="flex justify-between items-center border-t-2 border-b-2 border-slate-900 py-1.5 font-black text-xs">
+              <span>Items: {totalItems}</span>
+              <span>Qty: {totalQty}</span>
+              <span className="text-sm font-black tracking-tight">{formatCurrency(invoice.total_amount)}</span>
             </div>
-            {invoice.discount_percentage > 0 && (
-              <div className="flex justify-between text-emerald-600">
-                <span>Discount ({invoice.discount_percentage}%):</span>
-                <span>-{formatCurrency(invoice.subtotal * (invoice.discount_percentage / 100))}</span>
+
+            {/* DMART GST BREAKUP DETAILS TABLE (EXACT DMART RECEIPT FORMAT) */}
+            <div className="border border-slate-800 p-2 rounded-sm bg-slate-50/70 text-[10px] space-y-1">
+              <div className="text-center font-black tracking-wider uppercase border-b border-dashed border-slate-400 pb-1">
+                &lt;----- GST Breakup Details (Amount INR) -----&gt;
               </div>
-            )}
-            <div className="flex justify-between text-slate-600">
-              <span>GST / Tax ({invoice.tax_percentage || 5}%):</span>
-              <span>+{formatCurrency((invoice.subtotal * (1 - (invoice.discount_percentage || 0) / 100)) * ((invoice.tax_percentage || 5) / 100))}</span>
-            </div>
-            <div className="flex justify-between border-t border-slate-800 pt-2 text-sm font-bold text-slate-900">
-              <span>Grand Total:</span>
-              <span className="text-teal-700">{formatCurrency(invoice.total_amount)}</span>
-            </div>
-          </div>
 
-          {/* Footer note */}
-          <div className="mt-6 border-t border-slate-100 pt-3 text-center text-[10px] text-slate-400 space-y-1">
-            <p>Thank you for choosing PharmaCare Pro!</p>
-            <p>Get well soon. Store medicines below 25°C away from direct sunlight.</p>
-            <p className="italic font-mono text-[9px]">Developed by Satyam Kumar (12314877) - Full-Stack Web Dev</p>
+              <table className="w-full text-left font-mono text-[10px]">
+                <thead>
+                  <tr className="border-b border-slate-300 text-slate-700 font-bold uppercase">
+                    <th className="py-1">GST Slab</th>
+                    <th className="py-1 text-right">Taxable</th>
+                    <th className="py-1 text-right">CGST</th>
+                    <th className="py-1 text-right">SGST</th>
+                    <th className="py-1 text-right font-bold">Total Amt</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {gstBreakup.map((row, idx) => (
+                    <tr key={idx}>
+                      <td className="py-1 font-bold">
+                        {row.gst_rate}% ({row.cgst_rate}%+{row.sgst_rate}%)
+                      </td>
+                      <td className="py-1 text-right">{Number(row.taxable_amount || 0).toFixed(2)}</td>
+                      <td className="py-1 text-right">{Number(row.cgst_amount || 0).toFixed(2)}</td>
+                      <td className="py-1 text-right">{Number(row.sgst_amount || 0).toFixed(2)}</td>
+                      <td className="py-1 text-right font-bold">{Number(row.total_amount || 0).toFixed(2)}</td>
+                    </tr>
+                  ))}
+                  {/* Totals row */}
+                  <tr className="border-t-2 border-slate-900 font-black text-[11px]">
+                    <td className="py-1">TOTAL:</td>
+                    <td className="py-1 text-right">{totalTaxable.toFixed(2)}</td>
+                    <td className="py-1 text-right">{totalCgst.toFixed(2)}</td>
+                    <td className="py-1 text-right">{totalSgst.toFixed(2)}</td>
+                    <td className="py-1 text-right">{Number(invoice.total_amount).toFixed(2)}</td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <div className="pt-1 text-[9px] text-slate-500 text-center border-t border-dashed border-slate-300">
+                Total Tax: ₹{totalTaxAll.toFixed(2)} (CGST: ₹{totalCgst.toFixed(2)} + SGST: ₹{totalSgst.toFixed(2)})
+              </div>
+            </div>
+
+            {/* Payment Mode Received Section */}
+            <div className="text-center border-t border-dashed border-slate-400 pt-2 text-[11px] leading-snug">
+              <p className="text-[10px] uppercase text-slate-500 tracking-wider">
+                &lt;----- Amount Received From Customer -----&gt;
+              </p>
+              <p className="font-extrabold text-slate-900">
+                {invoice.payment_method || 'UPI'} Payment: {formatCurrency(invoice.total_amount)}
+              </p>
+            </div>
+
+            {/* DMART HIGHLIGHTED SAVINGS ON MRP BANNER (Matching the yellow highlight in photo) */}
+            <div className="my-3 text-center">
+              <div className="inline-block w-full border-2 border-dashed border-emerald-600 bg-amber-100 dark:bg-amber-100 p-2 rounded-sm shadow-sm">
+                <p className="font-black text-xs sm:text-sm text-slate-900 tracking-wider uppercase">
+                  * * * Saved Rs. {Number(totalSavings).toFixed(2)} On MRP * * *
+                </p>
+                <p className="text-[10px] text-emerald-800 font-bold">
+                  Thank You for Shopping at PharmaCare / DMart Pharmacy!
+                </p>
+              </div>
+            </div>
+
+            {/* Barcode & Machine Generated Stamp */}
+            <div className="pt-2 text-center space-y-1">
+              <div className="flex justify-center items-center gap-1 font-mono tracking-widest text-slate-800 text-xs py-1">
+                <span className="font-bold">||||| | |||| ||| |||||| | ||| |||| ||||||</span>
+              </div>
+              <p className="text-[9px] text-slate-500 italic">
+                * This is a Computer Generated Tax Invoice *
+              </p>
+              <div className="text-[9px] text-slate-600 font-sans border-t border-slate-200 pt-1">
+                <strong>Course:</strong> Full-Stack Web Development | <strong>Student:</strong> Satyam Kumar (12314877)
+              </div>
+            </div>
+
           </div>
         </div>
 
-        {/* Modal Bottom Close (hidden in print) */}
-        <div className="border-t border-slate-100 bg-slate-50 px-6 py-3 text-right no-print">
+        {/* Modal Bottom Bar (hidden in print) */}
+        <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-6 py-3 no-print">
+          <div className="text-xs text-slate-500 font-medium">
+            Standard GST Compliant Invoice (H.S.N 3004 / 3808)
+          </div>
           <button
             onClick={onClose}
-            className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition"
+            className="rounded-xl border border-slate-300 bg-white px-5 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100 transition cursor-pointer"
           >
-            Done / Close
+            Close Invoice
           </button>
         </div>
+
       </div>
     </div>
   );

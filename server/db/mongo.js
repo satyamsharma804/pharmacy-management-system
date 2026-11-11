@@ -17,6 +17,7 @@ async function connectDB() {
     });
     console.log('MongoDB connected successfully!');
     await seedIfEmpty();
+    await updateMedicineDefaultsAndSubstitutes();
   } catch (err) {
     console.error('MongoDB connection error:', err.message);
     console.warn('Please provide a valid MONGODB_URI in .env or ensure MongoDB is running.');
@@ -183,6 +184,188 @@ async function seedIfEmpty() {
     console.log('MongoDB seeding completed successfully!');
   } catch (err) {
     console.error('Error during MongoDB seeding:', err);
+  }
+}
+
+async function updateMedicineDefaultsAndSubstitutes() {
+  try {
+    const inDays = (days) => {
+      const d = new Date();
+      d.setDate(d.getDate() + days);
+      return d.toISOString().split('T')[0];
+    };
+
+    // 1. Ensure existing medicines have realistic GST rates (0, 5, 12, 18), HSN, and MRP
+    const meds = await Medicine.find();
+    for (const m of meds) {
+      let changed = false;
+      if (m.gst_rate === undefined || m.gst_rate === null) {
+        if (m.name.includes('Electral') || m.name.includes('Insulin') || m.name.includes('Lantus')) {
+          m.gst_rate = 5; // Life-saving insulin & ORS: 5%
+        } else if (m.name.includes('Savlon') || m.name.includes('Disinfectant')) {
+          m.gst_rate = 18; // Disinfectant & medicated hygiene: 18%
+        } else if (m.name.includes('Vaccine') || m.name.includes('Polio')) {
+          m.gst_rate = 0; // Essential vaccines: 0%
+        } else {
+          m.gst_rate = 12; // Standard pharmaceutical tablets & syrups: 12%
+        }
+        changed = true;
+      }
+
+      if (!m.hsn_code) {
+        m.hsn_code = m.gst_rate === 18 ? '3808' : (m.gst_rate === 0 ? '3002' : '3004');
+        changed = true;
+      }
+
+      if (!m.mrp || m.mrp <= m.selling_price) {
+        m.mrp = parseFloat((m.selling_price * 1.25).toFixed(2));
+        changed = true;
+      }
+
+      // Standardize generic name for Paracetamol
+      if (m.name.includes('Dolo') && !m.generic_name.includes('Paracetamol')) {
+        m.generic_name = 'Acetaminophen / Paracetamol';
+        changed = true;
+      }
+
+      if (changed) {
+        await m.save();
+      }
+    }
+
+    // 2. Ensure Indian generic substitute brands exist in MongoDB Atlas for instant testing
+    const hasCalpol = await Medicine.findOne({ name: { $regex: 'Calpol', $options: 'i' } });
+    if (!hasCalpol) {
+      const suppliers = await Supplier.find();
+      const supId = suppliers[0]?._id;
+      const supName = suppliers[0]?.name || 'Sun Pharma Distributors';
+
+      await Medicine.insertMany([
+        {
+          name: 'Calpol 650 (GSK)',
+          generic_name: 'Acetaminophen / Paracetamol',
+          category: 'Analgesic / Antipyretic',
+          batch_number: 'CAL-9102',
+          hsn_code: '3004',
+          gst_rate: 12,
+          mrp: 32,
+          purchase_price: 14,
+          selling_price: 24,
+          quantity: 90,
+          min_stock_level: 20,
+          expiry_date: inDays(350),
+          dosage_form: 'Tablet',
+          strength: '650mg',
+          location_shelf: 'Shelf A-1',
+          supplier: supId,
+          supplier_name: supName,
+          description: 'Alternative brand for Dolo 650 with identical Paracetamol 650mg composition (Save ₹6!).'
+        },
+        {
+          name: 'Crocin 650 Advance (Haleon)',
+          generic_name: 'Acetaminophen / Paracetamol',
+          category: 'Analgesic / Antipyretic',
+          batch_number: 'CRO-4412',
+          hsn_code: '3004',
+          gst_rate: 12,
+          mrp: 34,
+          purchase_price: 16,
+          selling_price: 28,
+          quantity: 65,
+          min_stock_level: 15,
+          expiry_date: inDays(400),
+          dosage_form: 'Tablet',
+          strength: '650mg',
+          location_shelf: 'Shelf A-1',
+          supplier: supId,
+          supplier_name: supName,
+          description: 'Fast acting Paracetamol formulation (Substitute for Dolo/Calpol).'
+        },
+        {
+          name: 'Moxikind-CV 625 (Mankind)',
+          generic_name: 'Amoxicillin + Clavulanic Acid',
+          category: 'Antibiotic',
+          batch_number: 'MOX-7712',
+          hsn_code: '3004',
+          gst_rate: 12,
+          mrp: 145,
+          purchase_price: 75,
+          selling_price: 110,
+          quantity: 70,
+          min_stock_level: 15,
+          expiry_date: inDays(280),
+          dosage_form: 'Tablet',
+          strength: '625mg',
+          location_shelf: 'Shelf B-2',
+          supplier: supId,
+          supplier_name: supName,
+          description: 'Affordable generic substitute for Augmentin 625 Duo (Save ₹35!).'
+        },
+        {
+          name: 'Pantocid 40 (Sun Pharma)',
+          generic_name: 'Pantoprazole Sodium',
+          category: 'Gastrointestinal',
+          batch_number: 'PCD-8812',
+          hsn_code: '3004',
+          gst_rate: 12,
+          mrp: 85,
+          purchase_price: 38,
+          selling_price: 68,
+          quantity: 80,
+          min_stock_level: 20,
+          expiry_date: inDays(320),
+          dosage_form: 'Tablet',
+          strength: '40mg',
+          location_shelf: 'Shelf D-2',
+          supplier: supId,
+          supplier_name: supName,
+          description: 'High quality brand substitute for Pan-40 (Save ₹7!).'
+        },
+        {
+          name: 'Savlon Antiseptic Liquid (100ml)',
+          generic_name: 'Chlorhexidine + Cetrimide',
+          category: 'Antiseptic / Disinfectant',
+          batch_number: 'SAV-9021',
+          hsn_code: '3808',
+          gst_rate: 18,
+          mrp: 95,
+          purchase_price: 52,
+          selling_price: 85,
+          quantity: 45,
+          min_stock_level: 10,
+          expiry_date: inDays(500),
+          dosage_form: 'Syrup',
+          strength: '100ml',
+          location_shelf: 'Shelf F-3',
+          supplier: supId,
+          supplier_name: supName,
+          description: 'Medicated antiseptic liquid (18% GST slab).'
+        },
+        {
+          name: 'Polio Oral Drops (Exempt)',
+          generic_name: 'Oral Poliomyelitis Vaccine',
+          category: 'Vaccines / Preventive',
+          batch_number: 'POL-1002',
+          hsn_code: '3002',
+          gst_rate: 0,
+          mrp: 15,
+          purchase_price: 5,
+          selling_price: 10,
+          quantity: 50,
+          min_stock_level: 10,
+          expiry_date: inDays(150),
+          dosage_form: 'Syrup',
+          strength: '2ml',
+          location_shelf: 'Fridge-2',
+          supplier: supId,
+          supplier_name: supName,
+          description: 'Government approved life-saving vaccine (0% GST Tax Exempt).'
+        }
+      ]);
+      console.log('Seeded Indian generic substitute brands and GST 0% / 18% products.');
+    }
+  } catch (err) {
+    console.error('Error updating medicine defaults & substitutes:', err.message);
   }
 }
 

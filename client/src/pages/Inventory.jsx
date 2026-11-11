@@ -83,6 +83,9 @@ export default function Inventory() {
         generic_name: med.generic_name || '',
         category: med.category,
         batch_number: med.batch_number,
+        hsn_code: med.hsn_code || '3004',
+        gst_rate: med.gst_rate !== undefined ? med.gst_rate : 12,
+        mrp: med.mrp || med.selling_price || '',
         supplier_id: med.supplier_id || '',
         purchase_price: med.purchase_price,
         selling_price: med.selling_price,
@@ -103,6 +106,9 @@ export default function Inventory() {
         generic_name: '',
         category: categories[0] || 'Antibiotic',
         batch_number: randomBatch,
+        hsn_code: '3004',
+        gst_rate: 12,
+        mrp: '',
         supplier_id: suppliers[0]?.id || '',
         purchase_price: '',
         selling_price: '',
@@ -275,7 +281,23 @@ export default function Inventory() {
                     <tr key={m.id} className="hover:bg-slate-50/80 transition">
                       <td className="py-3 px-4">
                         <div className="font-bold text-slate-900">{m.name}</div>
-                        <div className="text-[11px] text-slate-400">{m.generic_name || 'Generic'}</div>
+                        <div className="text-[11px] text-teal-700 font-medium">Salt: {m.generic_name || 'Generic Salt'}</div>
+                        <div className="flex items-center gap-1.5 mt-1">
+                          <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                            m.gst_rate === 0
+                              ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                              : m.gst_rate === 5
+                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                              : m.gst_rate === 12
+                              ? 'bg-teal-50 text-teal-800 border border-teal-200'
+                              : 'bg-purple-50 text-purple-800 border border-purple-200'
+                          }`}>
+                            {m.gst_rate ?? 12}% GST
+                          </span>
+                          <span className="font-mono text-[10px] text-slate-400">
+                            HSN: {m.hsn_code || '3004'}
+                          </span>
+                        </div>
                       </td>
                       <td className="py-3 px-4">
                         <span className="font-medium text-slate-700">{m.category}</span>
@@ -287,6 +309,9 @@ export default function Inventory() {
                       </td>
                       <td className="py-3 px-4">
                         <div className="font-bold text-slate-900">{formatCurrency(m.selling_price)}</div>
+                        {m.mrp && m.mrp > m.selling_price && (
+                          <div className="text-[10px] text-emerald-600 font-semibold">MRP: {formatCurrency(m.mrp)}</div>
+                        )}
                         <div className="text-[10px] text-slate-400">Cost: {formatCurrency(m.purchase_price)}</div>
                       </td>
                       <td className="py-3 px-4 text-center">
@@ -453,6 +478,17 @@ export default function Inventory() {
                   />
                 </div>
                 <div>
+                  <label className="block font-semibold text-slate-700 mb-1">MRP (₹) Printed</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="35.00"
+                    value={formData.mrp}
+                    onChange={(e) => setFormData({ ...formData, mrp: e.target.value })}
+                    className="w-full rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs focus:border-teal-500 focus:bg-white focus:outline-none"
+                  />
+                </div>
+                <div>
                   <label className="block font-semibold text-slate-700 mb-1">Stock Quantity *</label>
                   <input
                     type="number"
@@ -463,14 +499,45 @@ export default function Inventory() {
                     className="w-full rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs focus:border-teal-500 focus:bg-white focus:outline-none"
                   />
                 </div>
+              </div>
+
+              {/* Indian GST Tax Slabs & HSN Code */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-teal-50/60 p-3 rounded-xl border border-teal-100">
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Min Alert Level</label>
+                  <label className="block font-bold text-teal-900 mb-1">GST Tax Bracket (%) *</label>
+                  <select
+                    value={formData.gst_rate}
+                    onChange={(e) => setFormData({ ...formData, gst_rate: Number(e.target.value) })}
+                    className="w-full rounded-lg border border-teal-200 bg-white p-2 text-xs font-bold text-teal-900 focus:border-teal-500 focus:outline-none"
+                  >
+                    <option value={0}>0% - Tax Exempt (Vaccines / Contraceptives)</option>
+                    <option value={5}>5% - Essential (Insulin, Dialysis, ORS)</option>
+                    <option value={12}>12% - Standard Pharma (Antibiotics, Tablets)</option>
+                    <option value={18}>18% - Hygiene / Supplements (Disinfectants)</option>
+                  </select>
+                  <p className="text-[10px] text-teal-700 mt-1">Split: {formData.gst_rate / 2}% CGST + {formData.gst_rate / 2}% SGST</p>
+                </div>
+                <div>
+                  <label className="block font-bold text-teal-900 mb-1">HSN Code *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="3004"
+                    value={formData.hsn_code}
+                    onChange={(e) => setFormData({ ...formData, hsn_code: e.target.value })}
+                    className="w-full rounded-lg border border-teal-200 bg-white p-2 text-xs font-mono font-bold text-teal-900 focus:border-teal-500 focus:outline-none"
+                  />
+                  <p className="text-[10px] text-teal-700 mt-1">3004 (Medicaments), 3808 (Antiseptics)</p>
+                </div>
+                <div>
+                  <label className="block font-bold text-teal-900 mb-1">Min Stock Alert Level</label>
                   <input
                     type="number"
                     value={formData.min_stock_level}
                     onChange={(e) => setFormData({ ...formData, min_stock_level: e.target.value })}
-                    className="w-full rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs focus:border-teal-500 focus:bg-white focus:outline-none"
+                    className="w-full rounded-lg border border-teal-200 bg-white p-2 text-xs focus:border-teal-500 focus:outline-none"
                   />
+                  <p className="text-[10px] text-teal-700 mt-1">Triggers low-stock warning</p>
                 </div>
               </div>
 

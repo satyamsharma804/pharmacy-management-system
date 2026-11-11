@@ -21,7 +21,11 @@ import {
   Repeat,
   Sparkles,
   Clock,
-  ArrowRight
+  ArrowRight,
+  Layers,
+  FlaskConical,
+  Receipt,
+  BadgePercent
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import InvoiceModal from '../components/InvoiceModal';
@@ -32,6 +36,7 @@ export default function POSBilling() {
   const [categories, setCategories] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [search, setSearch] = useState('');
+  const [searchMode, setSearchMode] = useState('all'); // 'all', 'brand', 'salt'
   const [cart, setCart] = useState([]);
   
   // Customer details & Auto-suggest state
@@ -44,10 +49,15 @@ export default function POSBilling() {
   const [customerOrders, setCustomerOrders] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
-  // Bill calculations
+  // Generic Salt Substitute Finder state
+  const [substituteModal, setSubstituteModal] = useState(false);
+  const [selectedSubMedicine, setSelectedSubMedicine] = useState(null);
+  const [substitutesList, setSubstitutesList] = useState([]);
+  const [loadingSubstitutes, setLoadingSubstitutes] = useState(false);
+
+  // Bill calculations & Payment
   const [paymentMethod, setPaymentMethod] = useState('UPI');
   const [discountPercent, setDiscountPercent] = useState(0);
-  const [taxPercent, setTaxPercent] = useState(5);
   const [notes, setNotes] = useState('');
   
   const [loading, setLoading] = useState(false);
@@ -60,7 +70,12 @@ export default function POSBilling() {
   // Load medicines catalog & categories
   const loadMedicines = async () => {
     try {
-      let query = `?search=${encodeURIComponent(search)}`;
+      let query = '';
+      if (searchMode === 'salt') {
+        query = `?composition=${encodeURIComponent(search)}`;
+      } else {
+        query = `?search=${encodeURIComponent(search)}`;
+      }
       if (selectedCategory !== 'All') query += `&category=${encodeURIComponent(selectedCategory)}`;
       
       const [medsData, catsData] = await Promise.all([
@@ -76,7 +91,7 @@ export default function POSBilling() {
 
   useEffect(() => {
     loadMedicines();
-  }, [search, selectedCategory]);
+  }, [search, selectedCategory, searchMode]);
 
   // Customer phone/number search suggestions
   useEffect(() => {
@@ -85,8 +100,22 @@ export default function POSBilling() {
       if (term.length >= 2 && !selectedCustomer) {
         try {
           const results = await apiRequest(`/customers?search=${encodeURIComponent(term)}`);
-          setCustomerSuggestions(results.slice(0, 5));
+          setCustomerSuggestions(results.slice(0, 6));
           setShowSuggestions(results.length > 0);
+
+          // If a full 10-digit phone number is entered, auto-link existing customer
+          const cleanInputDigits = customerPhone.replace(/\D/g, '');
+          if (cleanInputDigits.length >= 10) {
+            const exactMatch = results.find(c => {
+              const custDigits = (c.phone || '').replace(/\D/g, '');
+              return custDigits === cleanInputDigits || custDigits.endsWith(cleanInputDigits) || cleanInputDigits.endsWith(custDigits);
+            });
+            if (exactMatch) {
+              setSelectedCustomer(exactMatch);
+              setCustomerName(exactMatch.name);
+              setShowSuggestions(false);
+            }
+          }
         } catch (err) {
           console.error(err);
         }
@@ -141,6 +170,23 @@ export default function POSBilling() {
     }
   };
 
+  // Open Generic Salt Substitutes & Brand Comparison Modal
+  const handleOpenSubstitutes = async (med, e) => {
+    if (e) e.stopPropagation();
+    setSelectedSubMedicine(med);
+    setSubstituteModal(true);
+    setLoadingSubstitutes(true);
+    try {
+      const data = await apiRequest(`/medicines/substitutes/${med.id || med._id}`);
+      setSubstitutesList(data.substitutes || []);
+    } catch (err) {
+      console.error('Failed to load substitutes:', err);
+      setSubstitutesList([]);
+    } finally {
+      setLoadingSubstitutes(false);
+    }
+  };
+
   // Cart operations
   const addToCart = (med) => {
     if (med.quantity <= 0) return;
@@ -163,7 +209,11 @@ export default function POSBilling() {
           {
             medicine_id: med.id || med._id,
             name: med.name,
+            generic_name: med.generic_name || '',
             batch_number: med.batch_number,
+            hsn_code: med.hsn_code || '3004',
+            gst_rate: med.gst_rate !== undefined ? med.gst_rate : 12,
+            mrp: med.mrp || (med.selling_price * 1.25),
             selling_price: med.selling_price,
             max_stock: med.quantity,
             dosage_form: med.dosage_form,
@@ -217,12 +267,40 @@ export default function POSBilling() {
     setError('');
   };
 
-  // Calculations
+  // Indian GST & DMart Calculations
   const subtotal = cart.reduce((sum, item) => sum + item.selling_price * item.quantity, 0);
+  const discountMultiplier = 1 - (Number(discountPercent) / 100);
   const discountAmount = subtotal * (Number(discountPercent) / 100);
-  const taxableAmount = subtotal - discountAmount;
-  const taxAmount = taxableAmount * (Number(taxPercent) / 100);
-  const grandTotal = taxableAmount + taxAmount;
+
+  // Group GST by Indian Slabs (0%, 5%, 12%, 18%)
+  const gstBreakupLive = cart.reduce((acc, item) => {
+    const rate = Number(item.gst_rate !== undefined ? item.gst_rate : 12);
+    const itemTotal = item.selling_price * item.quantity;
+    const taxable = itemTotal * discountMultiplier;
+    const halfRate = rate / 2;
+    const cgst = taxable * (halfRate / 100);
+    const sgst = taxable * (halfRate / 100);
+    const totalTax = cgst + sgst;
+
+    if (!acc[rate]) {
+      acc[rate] = { rate, taxable: 0, cgst: 0, sgst: 0, totalTax: 0 };
+    }
+    acc[rate].taxable += taxable;
+    acc[rate].cgst += cgst;
+    acc[rate].sgst += sgst;
+    acc[rate].totalTax += totalTax;
+    return acc;
+  }, {});
+
+  const gstBreakupArray = Object.values(gstBreakupLive).sort((a, b) => a.rate - b.rate);
+  const totalTaxAmount = gstBreakupArray.reduce((sum, g) => sum + g.totalTax, 0);
+  const totalCgstAmount = gstBreakupArray.reduce((sum, g) => sum + g.cgst, 0);
+  const totalSgstAmount = gstBreakupArray.reduce((sum, g) => sum + g.sgst, 0);
+  const grandTotal = subtotal - discountAmount + totalTaxAmount;
+
+  // Total savings on MRP (DMart style highlight)
+  const totalMrp = cart.reduce((sum, item) => sum + Number(item.mrp || item.selling_price * 1.25) * item.quantity, 0);
+  const totalSavings = Math.max(0, totalMrp - grandTotal);
 
   // Checkout Handler
   const handleCheckout = async () => {
@@ -245,7 +323,6 @@ export default function POSBilling() {
           quantity: item.quantity
         })),
         discount_percentage: Number(discountPercent),
-        tax_percentage: Number(taxPercent),
         payment_method: paymentMethod,
         notes: notes.trim()
       };
@@ -279,15 +356,40 @@ export default function POSBilling() {
       <div className="lg:col-span-7 space-y-4">
         {/* Search & Category Filter */}
         <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-sm space-y-3 transition-colors">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3.5 top-3.5 h-4 w-4 text-slate-400" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search medicine by brand name, generic formula, or batch barcode..."
-              className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 py-2.5 pl-10 pr-4 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:border-teal-500 focus:bg-white dark:focus:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-500/20 transition"
-            />
+          <div className="flex flex-col sm:flex-row gap-2">
+            <div className="relative flex-1">
+              <Search className="pointer-events-none absolute left-3.5 top-3.5 h-4 w-4 text-slate-400" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder={
+                  searchMode === 'salt'
+                    ? "Enter active salt / formula: e.g. Paracetamol, Amoxicillin..."
+                    : "Search medicine by brand name, active formula, or barcode..."
+                }
+                className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 py-2.5 pl-10 pr-4 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:border-teal-500 focus:bg-white dark:focus:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-500/20 transition"
+              />
+            </div>
+
+            {/* Search Mode Toggles */}
+            <div className="flex items-center rounded-xl bg-slate-100 dark:bg-slate-800 p-1 text-[11px] font-bold">
+              <button
+                type="button"
+                onClick={() => setSearchMode('all')}
+                className={`rounded-lg px-2.5 py-1.5 transition ${searchMode === 'all' ? 'bg-white dark:bg-slate-700 text-teal-700 dark:text-teal-300 shadow-sm' : 'text-slate-500 hover:text-slate-900'}`}
+              >
+                All
+              </button>
+              <button
+                type="button"
+                onClick={() => setSearchMode('salt')}
+                className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 transition ${searchMode === 'salt' ? 'bg-white dark:bg-slate-700 text-teal-700 dark:text-teal-300 shadow-sm' : 'text-slate-500 hover:text-slate-900'}`}
+              >
+                <FlaskConical className="h-3 w-3" />
+                <span>By Salt</span>
+              </button>
+            </div>
           </div>
 
           {/* Category Filter Pills */}
@@ -337,7 +439,7 @@ export default function POSBilling() {
                   onClick={() => inStock && addToCart(med)}
                   className={`group relative flex flex-col justify-between rounded-2xl border p-3.5 text-left transition-all ${
                     !inStock
-                      ? 'border-slate-200 dark:border-slate-800 bg-slate-100/60 dark:bg-slate-800/40 opacity-60 cursor-not-allowed'
+                      ? 'border-slate-200 dark:border-slate-800 bg-slate-100/60 dark:bg-slate-800/40 opacity-75'
                       : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-850 hover:border-teal-400 dark:hover:border-teal-500 hover:shadow-md cursor-pointer'
                   }`}
                 >
@@ -350,18 +452,44 @@ export default function POSBilling() {
                         {med.dosage_form}
                       </span>
                     </div>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">{med.generic_name || med.category}</p>
-                    <div className="mt-1 flex items-center gap-2 text-[10px] text-slate-400 dark:text-slate-500 font-mono">
-                      <span>B: {med.batch_number}</span>
-                      <span>&bull;</span>
-                      <span>Shelf: {med.location_shelf || 'Main'}</span>
+
+                    {/* Active Salt Composition */}
+                    <div className="mt-1 flex items-center gap-1 text-[11px] font-semibold text-teal-700 dark:text-teal-400">
+                      <FlaskConical className="h-3 w-3 flex-shrink-0" />
+                      <span className="truncate">Salt: {med.generic_name || med.category}</span>
+                    </div>
+
+                    {/* Indian GST Tax Slab & HSN Badge */}
+                    <div className="mt-1 flex items-center gap-1.5 text-[10px]">
+                      <span className={`rounded px-1.5 py-0.5 font-bold ${
+                        med.gst_rate === 0
+                          ? 'bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-300'
+                          : med.gst_rate === 5
+                          ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300'
+                          : med.gst_rate === 12
+                          ? 'bg-teal-100 dark:bg-teal-950 text-teal-800 dark:text-teal-300'
+                          : 'bg-purple-100 dark:bg-purple-950 text-purple-800 dark:text-purple-300'
+                      }`}>
+                        {med.gst_rate ?? 12}% GST
+                      </span>
+                      <span className="font-mono text-slate-400 dark:text-slate-500">
+                        HSN: {med.hsn_code || '3004'}
+                      </span>
                     </div>
                   </div>
 
                   <div className="mt-3 flex items-center justify-between border-t border-slate-100 dark:border-slate-800/80 pt-2.5">
-                    <span className="text-sm font-black text-slate-900 dark:text-white">
-                      {formatCurrency(med.selling_price)}
-                    </span>
+                    <div>
+                      <span className="text-sm font-black text-slate-900 dark:text-white">
+                        {formatCurrency(med.selling_price)}
+                      </span>
+                      {med.mrp && med.mrp > med.selling_price && (
+                        <span className="block text-[10px] text-slate-400 dark:text-slate-500 line-through">
+                          MRP {formatCurrency(med.mrp)}
+                        </span>
+                      )}
+                    </div>
+
                     <div className="flex items-center gap-2">
                       <span
                         className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
@@ -381,6 +509,17 @@ export default function POSBilling() {
                       )}
                     </div>
                   </div>
+
+                  {/* Find Substitutes Button */}
+                  <button
+                    type="button"
+                    onClick={(e) => handleOpenSubstitutes(med, e)}
+                    className="mt-2.5 w-full flex items-center justify-center gap-1.5 rounded-xl border border-teal-200 dark:border-teal-800 bg-teal-50/80 dark:bg-teal-950/60 py-1.5 text-[11px] font-bold text-teal-800 dark:text-teal-300 hover:bg-teal-100 dark:hover:bg-teal-900 transition"
+                    title="Find alternative brand names with identical composition and compare prices"
+                  >
+                    <Sparkles className="h-3.5 w-3.5 text-teal-600 dark:text-teal-400" />
+                    <span>Find Substitutes (Same Salt)</span>
+                  </button>
                 </div>
               );
             })}
@@ -587,7 +726,7 @@ export default function POSBilling() {
           {/* Discounts, Tax & Payment Options */}
           {cart.length > 0 && (
             <div className="border-t border-slate-200 dark:border-slate-800 pt-3 space-y-3">
-              {/* Discount Presets & Tax */}
+              {/* Discount Presets & Custom % */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-xs">
                   <span className="font-semibold text-slate-600 dark:text-slate-400">Discount:</span>
@@ -622,15 +761,10 @@ export default function POSBilling() {
                     />
                   </div>
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Tax / GST %</label>
-                    <input
-                      type="number"
-                      min="0"
-                      max="30"
-                      value={taxPercent}
-                      onChange={(e) => setTaxPercent(e.target.value)}
-                      className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2 py-1.5 text-xs text-slate-900 dark:text-white focus:outline-none"
-                    />
+                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Tax Calculation</label>
+                    <div className="rounded-xl border border-teal-200 dark:border-teal-900/60 bg-teal-50/60 dark:bg-teal-950/40 px-2 py-1.5 text-[11px] font-bold text-teal-800 dark:text-teal-300">
+                      Auto Item GST (0, 5, 12, 18%)
+                    </div>
                   </div>
                 </div>
               </div>
@@ -664,26 +798,45 @@ export default function POSBilling() {
                 </div>
               </div>
 
-              {/* Totals Summary */}
-              <div className="rounded-2xl bg-slate-50 dark:bg-slate-800/60 p-3.5 space-y-1.5 text-xs border border-slate-100 dark:border-slate-800">
+              {/* DMart Style Indian GST & Totals Summary */}
+              <div className="rounded-2xl bg-slate-50 dark:bg-slate-800/60 p-3.5 space-y-2 text-xs border border-slate-100 dark:border-slate-800">
                 <div className="flex justify-between text-slate-600 dark:text-slate-400">
-                  <span>Subtotal:</span>
+                  <span>Subtotal (Items Total):</span>
                   <span className="font-semibold">{formatCurrency(subtotal)}</span>
                 </div>
+
                 {discountAmount > 0 && (
                   <div className="flex justify-between text-emerald-600 dark:text-emerald-400">
-                    <span>Discount ({discountPercent}%):</span>
+                    <span>Store Discount ({discountPercent}%):</span>
                     <span>-{formatCurrency(discountAmount)}</span>
                   </div>
                 )}
-                <div className="flex justify-between text-slate-600 dark:text-slate-400">
-                  <span>GST / Tax ({taxPercent}%):</span>
-                  <span>+{formatCurrency(taxAmount)}</span>
+
+                {/* Indian GST Breakup Table Preview */}
+                <div className="border-t border-dashed border-slate-200 dark:border-slate-700 pt-2 space-y-1">
+                  <div className="flex items-center justify-between text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                    <span>GST Tax (CGST + SGST):</span>
+                    <span className="text-teal-600 dark:text-teal-400 font-mono">+{formatCurrency(totalTaxAmount)}</span>
+                  </div>
+                  {gstBreakupArray.map((g) => (
+                    <div key={g.rate} className="flex justify-between text-[10px] text-slate-500 dark:text-slate-400 pl-2">
+                      <span>&bull; Slab {g.rate}% ({g.rate / 2}% CGST + {g.rate / 2}% SGST):</span>
+                      <span className="font-mono">{formatCurrency(g.totalTax)}</span>
+                    </div>
+                  ))}
                 </div>
+
                 <div className="flex justify-between border-t border-slate-200 dark:border-slate-700 pt-2 text-base font-black text-slate-900 dark:text-white">
                   <span>Payable Total:</span>
                   <span className="text-teal-600 dark:text-teal-400">{formatCurrency(grandTotal)}</span>
                 </div>
+
+                {/* DMart Savings on Printed MRP */}
+                {totalSavings > 0 && (
+                  <div className="mt-1 rounded-xl bg-amber-100 dark:bg-amber-950/60 p-2 text-center text-xs font-black text-slate-900 dark:text-amber-200 border border-amber-300 dark:border-amber-800 shadow-sm">
+                    🎉 Customer Saves {formatCurrency(totalSavings)} on Printed MRP!
+                  </div>
+                )}
               </div>
 
               {/* Error Alert */}
@@ -789,6 +942,139 @@ export default function POSBilling() {
             <div className="border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 px-6 py-3 text-right">
               <button
                 onClick={() => setCustomerHistoryModal(false)}
+                className="rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Generic Salt Substitutes & Brand Comparison Modal */}
+      {substituteModal && selectedSubMedicine && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="relative w-full max-w-xl rounded-2xl bg-white dark:bg-slate-900 shadow-2xl overflow-hidden border border-slate-200 dark:border-slate-800">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 px-6 py-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-teal-600 text-white">
+                    <FlaskConical className="h-4 w-4" />
+                  </span>
+                  <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                    Generic Salt Substitutes & Brand Comparison
+                  </h2>
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  Active Formula: <strong className="text-teal-700 dark:text-teal-300 font-semibold">{selectedSubMedicine.generic_name || selectedSubMedicine.name}</strong>
+                </p>
+              </div>
+              <button
+                onClick={() => setSubstituteModal(false)}
+                className="rounded-lg p-1 text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Requested Brand Banner */}
+            <div className="px-6 py-3 bg-teal-50/50 dark:bg-teal-950/30 border-b border-teal-100 dark:border-teal-900/50 flex items-center justify-between">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-teal-800 dark:text-teal-300">
+                  Requested Brand:
+                </p>
+                <p className="text-xs font-bold text-slate-900 dark:text-white">
+                  {selectedSubMedicine.name} &bull; {selectedSubMedicine.strength}
+                </p>
+              </div>
+              <div className="text-right">
+                <span className="text-xs font-extrabold text-slate-900 dark:text-white">
+                  {formatCurrency(selectedSubMedicine.selling_price)}
+                </span>
+                <span className={`block text-[10px] font-bold ${selectedSubMedicine.quantity > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                  {selectedSubMedicine.quantity > 0 ? `${selectedSubMedicine.quantity} in stock` : 'Out of Stock'}
+                </span>
+              </div>
+            </div>
+
+            {/* Substitutes List */}
+            <div className="p-6 max-h-[400px] overflow-y-auto space-y-3">
+              {loadingSubstitutes ? (
+                <div className="py-12 text-center text-slate-400">
+                  <div className="inline-block h-6 w-6 animate-spin rounded-full border-2 border-teal-600 border-t-transparent"></div>
+                  <p className="mt-2 text-xs">Scanning inventory for matching active salt...</p>
+                </div>
+              ) : substitutesList.length === 0 ? (
+                <div className="py-8 text-center text-slate-500 dark:text-slate-400">
+                  <Pill className="mx-auto h-8 w-8 text-slate-300 dark:text-slate-600 mb-2" />
+                  <p className="text-xs font-semibold">No alternative brands found in current stock</p>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    No other medicine in stock currently shares the exact formula "{selectedSubMedicine.generic_name}".
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                    {substitutesList.length} Alternative Brand(s) with identical chemical salt:
+                  </p>
+                  {substitutesList.map((sub) => {
+                    const priceDiff = selectedSubMedicine.selling_price - sub.selling_price;
+                    const isCheaper = priceDiff > 0;
+                    return (
+                      <div
+                        key={sub.id || sub._id}
+                        className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/60 p-3.5 flex items-center justify-between hover:border-teal-400 transition"
+                      >
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-slate-900 dark:text-white">
+                              {sub.name}
+                            </span>
+                            <span className="rounded bg-teal-100 dark:bg-teal-950 px-1.5 py-0.5 text-[10px] font-bold text-teal-800 dark:text-teal-300">
+                              {sub.dosage_form} &bull; {sub.strength}
+                            </span>
+                            <span className="rounded bg-slate-200 dark:bg-slate-700 px-1.5 py-0.5 text-[10px] font-mono text-slate-700 dark:text-slate-300">
+                              {sub.gst_rate ?? 12}% GST
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                            Supplier: {sub.supplier_name || 'Standard Pharma'} &bull; Shelf: {sub.location_shelf || 'A-1'}
+                          </p>
+                          {isCheaper && (
+                            <span className="inline-block text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
+                              &bull; Customer saves {formatCurrency(priceDiff)} per strip ({Math.round((priceDiff / selectedSubMedicine.selling_price) * 100)}% cheaper!)
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="text-right space-y-1.5 flex-shrink-0 ml-3">
+                          <div className="font-extrabold text-sm text-slate-900 dark:text-white">
+                            {formatCurrency(sub.selling_price)}
+                          </div>
+                          <button
+                            type="button"
+                            disabled={sub.quantity <= 0}
+                            onClick={() => {
+                              addToCart(sub);
+                              setSubstituteModal(false);
+                            }}
+                            className="flex items-center gap-1 rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-teal-700 transition disabled:opacity-50 cursor-pointer"
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                            <span>Add to Cart ({sub.quantity} left)</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </>
+              )}
+            </div>
+
+            <div className="border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 px-6 py-3 text-right">
+              <button
+                onClick={() => setSubstituteModal(false)}
                 className="rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100"
               >
                 Close
