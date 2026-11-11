@@ -6,6 +6,7 @@ const Medicine = require('../models/Medicine');
 const Supplier = require('../models/Supplier');
 const Customer = require('../models/Customer');
 const Sale = require('../models/Sale');
+const masterCatalog = require('./masterCatalog');
 
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/pharmacy_db';
 
@@ -363,6 +364,46 @@ async function updateMedicineDefaultsAndSubstitutes() {
         }
       ]);
       console.log('Seeded Indian generic substitute brands and GST 0% / 18% products.');
+    }
+
+    // Ensure full master catalog of 180+ items is present
+    const totalMeds = await Medicine.countDocuments();
+    if (totalMeds < masterCatalog.length) {
+      console.log(`Synchronizing full Indian pharmacy catalog (${totalMeds} currently, target ${masterCatalog.length})...`);
+      const suppliers = await Supplier.find();
+      const defaultSupplier = suppliers[0];
+
+      for (const item of masterCatalog) {
+        const existing = await Medicine.findOne({
+          $or: [
+            { batch_number: item.batch_number },
+            { name: item.name }
+          ]
+        });
+        if (!existing) {
+          await Medicine.create({
+            name: item.name,
+            generic_name: item.generic_name,
+            category: item.category,
+            batch_number: item.batch_number,
+            hsn_code: item.hsn_code,
+            gst_rate: item.gst_rate,
+            mrp: item.mrp,
+            selling_price: item.selling_price,
+            purchase_price: item.purchase_price,
+            quantity: item.quantity,
+            min_stock_level: item.min_stock_level,
+            expiry_date: inDays(30 * (item.expiry_months || 24)),
+            dosage_form: item.dosage_form,
+            strength: item.strength,
+            location_shelf: item.location_shelf,
+            description: item.description,
+            supplier: defaultSupplier?._id || null,
+            supplier_name: defaultSupplier?.name || 'Sun Pharma Distributors'
+          });
+        }
+      }
+      console.log('Full master catalog synchronized successfully!');
     }
   } catch (err) {
     console.error('Error updating medicine defaults & substitutes:', err.message);
