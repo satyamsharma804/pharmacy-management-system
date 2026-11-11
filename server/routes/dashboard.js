@@ -1,111 +1,100 @@
 const express = require('express');
 const router = express.Router();
-const { all, get } = require('../db/database');
+const Medicine = require('../models/Medicine');
+const Sale = require('../models/Sale');
+const Customer = require('../models/Customer');
+const Supplier = require('../models/Supplier');
 
 // GET /api/dashboard/stats
-router.get('/stats', (req, res) => {
+router.get('/stats', async (req, res) => {
   try {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
     // 1. Overall Metrics
-    const totalRev = get(`SELECT COALESCE(SUM(total_amount), 0) as total FROM sales`);
-    const todayRev = get(`
-      SELECT COALESCE(SUM(total_amount), 0) as total, COUNT(id) as count 
-      FROM sales 
-      WHERE date(created_at) = date('now')
-    `);
+    const [allSales, todaySales, medicines, customerCount, supplierCount] = await Promise.all([
+      Sale.find().select('total_amount createdAt'),
+      Sale.find({ createdAt: { $gte: todayStart } }),
+      Medicine.find(),
+      Customer.countDocuments(),
+      Supplier.countDocuments()
+    ]);
 
-    const medCounts = get(`
-      SELECT 
-        COUNT(id) as total_medicines,
-        COALESCE(SUM(quantity), 0) as total_units
-      FROM medicines
-    `);
+    const totalRev = allSales.reduce((sum, s) => sum + s.total_amount, 0);
+    const todayRev = todaySales.reduce((sum, s) => sum + s.total_amount, 0);
 
-    const lowStock = get(`
-      SELECT COUNT(id) as count 
-      FROM medicines 
-      WHERE quantity <= min_stock_level
-    `);
+    const totalMedicines = medicines.length;
+    const totalUnits = medicines.reduce((sum, m) => sum + m.quantity, 0);
+    const lowStockCount = medicines.filter(m => m.quantity <= m.min_stock_level).length;
 
-    const expiringSoon = get(`
-      SELECT COUNT(id) as count 
-      FROM medicines 
-      WHERE expiry_date <= date('now', '+30 days')
-    `);
-
-    const customerCount = get(`SELECT COUNT(id) as count FROM customers`);
-    const supplierCount = get(`SELECT COUNT(id) as count FROM suppliers`);
+    const in30Days = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0];
+    const expiringSoonCount = medicines.filter(m => m.expiry_date <= in30Days).length;
 
     // 2. Recent Sales
-    const recentSales = all(`
-      SELECT s.id, s.invoice_number, s.customer_name, s.total_amount, 
-             s.payment_method, s.created_at,
-             (SELECT COUNT(*) FROM sale_items WHERE sale_id = s.id) as items_count
-      FROM sales s
-      ORDER BY s.created_at DESC
-      LIMIT 6
-    `);
+    const recentSales = await Sale.find()
+      .sort({ createdAt: -1 })
+      .limit(6);
 
     // 3. Weekly Sales Chart Data (Past 7 Days)
-    const salesChart = all(`
-      WITH RECURSIVE dates(d) AS (
-        SELECT date('now', '-6 days')
-        UNION ALL
-        SELECT date(d, '+1 day') FROM dates WHERE d < date('now')
-      )
-      SELECT 
-        strftime('%d %b', dates.d) as date,
-        dates.d as raw_date,
-        COALESCE(SUM(s.total_amount), 0) as revenue,
-        COUNT(s.id) as transactions
-      FROM dates
-      LEFT JOIN sales s ON date(s.created_at) = dates.d
-      GROUP BY dates.d
-      ORDER BY dates.d ASC
-    `);
+    const salesChart = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const startOfDay = new Date(d.setHours(0, 0, 0, 0));
+      const endOfDay = new Date(d.setHours(23, 59, 59, 999));
+
+      const daySales = allSales.filter(s => s.createdAt >= startOfDay && s.createdAt <= endOfDay);
+      const dayRev = daySales.reduce((sum, s) => sum + s.total_amount, 0);
+
+      const dayLabel = startOfDay.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+      salesChart.push({
+        date: dayLabel,
+        revenue: parseFloat(dayRev.toFixed(2)),
+        transactions: daySales.length
+      });
+    }
 
     // 4. Category breakdown
-    const categoryStats = all(`
-      SELECT category, COUNT(id) as count, SUM(quantity) as total_stock
-      FROM medicines
-      GROUP BY category
-      ORDER BY count DESC
-      LIMIT 6
-    `);
+    const categoryMap = {};
+    medicines.forEach(m => {
+      if (!categoryMap[m.category]) {
+        categoryMap[m.category] = { category: m.category, count: 0, total_stock: 0 };
+      }
+      categoryMap[m.category].count += 1;
+      categoryMap[m.category].total_stock += m.quantity;
+    });
+    const categoryStats = Object.values(categoryMap)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 6);
 
     // 5. Urgent Stock Alert Previews
-    const lowStockItems = all(`
-      SELECT id, name, quantity, min_stock_level, location_shelf, batch_number
-      FROM medicines
-      WHERE quantity <= min_stock_level
-      ORDER BY quantity ASC
-      LIMIT 4
-    `);
+    const lowStockItems = medicines
+      .filter(m => m.quantity <= m.min_stock_level)
+      .sort((a, b) => a.quantity - b.quantity)
+      .slice(0, 4);
 
-    const expiringItems = all(`
-      SELECT id, name, batch_number, quantity, expiry_date, location_shelf
-      FROM medicines
-      WHERE expiry_date <= date('now', '+30 days')
-      ORDER BY expiry_date ASC
-      LIMIT 4
-    `);
+    const expiringItems = medicines
+      .filter(m => m.expiry_date <= in30Days)
+      .sort((a, b) => a.expiry_date.localeCompare(b.expiry_date))
+      .slice(0, 4);
 
     res.json({
       revenue: {
-        total: totalRev ? totalRev.total : 0,
-        today: todayRev ? todayRev.total : 0,
-        today_orders: todayRev ? todayRev.count : 0
+        total: parseFloat(totalRev.toFixed(2)),
+        today: parseFloat(todayRev.toFixed(2)),
+        today_orders: todaySales.length
       },
       inventory: {
-        total_medicines: medCounts ? medCounts.total_medicines : 0,
-        total_units: medCounts ? medCounts.total_units : 0,
-        low_stock_count: lowStock ? lowStock.count : 0,
-        expiring_soon_count: expiringSoon ? expiringSoon.count : 0
+        total_medicines: totalMedicines,
+        total_units: totalUnits,
+        low_stock_count: lowStockCount,
+        expiring_soon_count: expiringSoonCount
       },
       counts: {
-        customers: customerCount ? customerCount.count : 0,
-        suppliers: supplierCount ? supplierCount.count : 0
+        customers: customerCount,
+        suppliers: supplierCount
       },
-      recent_sales: recentSales,
+      recent_sales: recentSales.map(s => s.toJSON()),
       sales_chart: salesChart,
       category_stats: categoryStats,
       alerts: {
@@ -119,4 +108,3 @@ router.get('/stats', (req, res) => {
 });
 
 module.exports = router;
-

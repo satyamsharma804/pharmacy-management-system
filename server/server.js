@@ -1,10 +1,12 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 
-// Ensure database is initialized
-require('./db/database');
+// Connect to MongoDB (Atlas in production or local MongoDB)
+const { connectDB } = require('./db/mongo');
+connectDB();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -39,6 +41,7 @@ app.use('/api/dashboard', dashboardRouter);
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'online',
+    database: 'MongoDB',
     project: 'Pharmacy Management System',
     developer: 'Satyam Kumar (Reg: 12314877)',
     course: 'Full-Stack Web Development',
@@ -59,6 +62,7 @@ if (fs.existsSync(clientDist)) {
 app.listen(PORT, () => {
   console.log(`====================================================`);
   console.log(` Pharmacy Management System running on http://localhost:${PORT}`);
+  console.log(` Database: MongoDB (Atlas / Local)`);
   console.log(` Student: Satyam Kumar (Reg: 12314877)`);
   console.log(` Course: Full-Stack Web Development`);
   console.log(`====================================================`);

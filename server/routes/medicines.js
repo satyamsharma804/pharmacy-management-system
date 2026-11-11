@@ -1,75 +1,64 @@
 const express = require('express');
 const router = express.Router();
-const { all, get, run } = require('../db/database');
+const Medicine = require('../models/Medicine');
+const Supplier = require('../models/Supplier');
 
 // GET /api/medicines - List with search & filters
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const { search, category, low_stock, expiring_soon } = req.query;
-    let sql = `
-      SELECT m.*, s.name as supplier_name 
-      FROM medicines m
-      LEFT JOIN suppliers s ON m.supplier_id = s.id
-      WHERE 1=1
-    `;
-    const params = [];
+    const filter = {};
 
     if (search) {
-      sql += ` AND (m.name LIKE ? OR m.generic_name LIKE ? OR m.batch_number LIKE ?)`;
-      const term = `%${search}%`;
-      params.push(term, term, term);
+      filter.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { generic_name: { $regex: search, $options: 'i' } },
+        { batch_number: { $regex: search, $options: 'i' } }
+      ];
     }
 
     if (category && category !== 'All') {
-      sql += ` AND m.category = ?`;
-      params.push(category);
+      filter.category = category;
     }
 
     if (low_stock === 'true') {
-      sql += ` AND m.quantity <= m.min_stock_level`;
+      filter.$expr = { $lte: ['$quantity', '$min_stock_level'] };
     }
 
     if (expiring_soon === 'true') {
-      // Expiring within 30 days
-      sql += ` AND m.expiry_date <= date('now', '+30 days')`;
+      const in30Days = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0];
+      filter.expiry_date = { $lte: in30Days };
     }
 
-    sql += ` ORDER BY m.name ASC`;
-
-    const medicines = all(sql, params);
+    const medicines = await Medicine.find(filter).sort({ name: 1 });
     res.json(medicines);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// GET /api/medicines/categories - Distinct categories
-router.get('/meta/categories', (req, res) => {
+// GET /api/medicines/meta/categories - Distinct categories
+router.get('/meta/categories', async (req, res) => {
   try {
-    const rows = all(`SELECT DISTINCT category FROM medicines WHERE category IS NOT NULL ORDER BY category ASC`);
-    const categories = rows.map(r => r.category);
-    res.json(categories);
+    const categories = await Medicine.distinct('category');
+    res.json(categories.filter(Boolean).sort());
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 // GET /api/medicines/alerts/summary
-router.get('/alerts/summary', (req, res) => {
+router.get('/alerts/summary', async (req, res) => {
   try {
-    const lowStock = all(`
-      SELECT id, name, batch_number, quantity, min_stock_level, location_shelf 
-      FROM medicines 
-      WHERE quantity <= min_stock_level 
-      ORDER BY quantity ASC
-    `);
+    const in30Days = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0];
 
-    const expiringSoon = all(`
-      SELECT id, name, batch_number, quantity, expiry_date, location_shelf 
-      FROM medicines 
-      WHERE expiry_date <= date('now', '+30 days') 
-      ORDER BY expiry_date ASC
-    `);
+    const lowStock = await Medicine.find({
+      $expr: { $lte: ['$quantity', '$min_stock_level'] }
+    }).sort({ quantity: 1 });
+
+    const expiringSoon = await Medicine.find({
+      expiry_date: { $lte: in30Days }
+    }).sort({ expiry_date: 1 });
 
     res.json({
       low_stock: lowStock,
@@ -82,15 +71,9 @@ router.get('/alerts/summary', (req, res) => {
 });
 
 // GET /api/medicines/:id
-router.get('/:id', (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
-    const medicine = get(`
-      SELECT m.*, s.name as supplier_name 
-      FROM medicines m
-      LEFT JOIN suppliers s ON m.supplier_id = s.id
-      WHERE m.id = ?
-    `, [req.params.id]);
-
+    const medicine = await Medicine.findById(req.params.id);
     if (!medicine) return res.status(404).json({ error: 'Medicine not found' });
     res.json(medicine);
   } catch (err) {
@@ -99,7 +82,7 @@ router.get('/:id', (req, res) => {
 });
 
 // POST /api/medicines - Create medicine
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   try {
     const {
       name,
@@ -122,81 +105,67 @@ router.post('/', (req, res) => {
       return res.status(400).json({ error: 'Required fields: name, category, batch_number, selling_price, expiry_date' });
     }
 
-    const existingBatch = get('SELECT id FROM medicines WHERE batch_number = ?', [batch_number]);
-    if (existingBatch) {
+    const existing = await Medicine.findOne({ batch_number });
+    if (existing) {
       return res.status(400).json({ error: `Medicine with batch number '${batch_number}' already exists.` });
     }
 
-    const result = run(`
-      INSERT INTO medicines (
-        name, generic_name, category, batch_number, supplier_id,
-        purchase_price, selling_price, quantity, min_stock_level,
-        expiry_date, dosage_form, strength, location_shelf, description
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
+    let supplierName = '';
+    if (supplier_id) {
+      const sup = await Supplier.findById(supplier_id);
+      if (sup) supplierName = sup.name;
+    }
+
+    const medicine = await Medicine.create({
       name,
-      generic_name || '',
+      generic_name: generic_name || '',
       category,
       batch_number,
-      supplier_id ? Number(supplier_id) : null,
-      Number(purchase_price || 0),
-      Number(selling_price),
-      Number(quantity || 0),
-      Number(min_stock_level || 10),
+      supplier: supplier_id || null,
+      supplier_name: supplierName,
+      purchase_price: Number(purchase_price || 0),
+      selling_price: Number(selling_price),
+      quantity: Number(quantity || 0),
+      min_stock_level: Number(min_stock_level || 10),
       expiry_date,
       dosage_form,
-      strength || '',
-      location_shelf || '',
-      description || ''
-    ]);
+      strength: strength || '',
+      location_shelf: location_shelf || '',
+      description: description || ''
+    });
 
-    const created = get('SELECT * FROM medicines WHERE id = ?', [Number(result.lastInsertRowid)]);
-    res.status(201).json(created);
+    res.status(201).json(medicine);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 // PUT /api/medicines/:id - Update medicine
-router.put('/:id', (req, res) => {
+router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const existing = get('SELECT * FROM medicines WHERE id = ?', [id]);
-    if (!existing) return res.status(404).json({ error: 'Medicine not found' });
+    const medicine = await Medicine.findById(id);
+    if (!medicine) return res.status(404).json({ error: 'Medicine not found' });
 
-    const {
-      name = existing.name,
-      generic_name = existing.generic_name,
-      category = existing.category,
-      batch_number = existing.batch_number,
-      supplier_id = existing.supplier_id,
-      purchase_price = existing.purchase_price,
-      selling_price = existing.selling_price,
-      quantity = existing.quantity,
-      min_stock_level = existing.min_stock_level,
-      expiry_date = existing.expiry_date,
-      dosage_form = existing.dosage_form,
-      strength = existing.strength,
-      location_shelf = existing.location_shelf,
-      description = existing.description
-    } = req.body;
+    let supplierName = medicine.supplier_name;
+    if (req.body.supplier_id && req.body.supplier_id !== String(medicine.supplier)) {
+      const sup = await Supplier.findById(req.body.supplier_id);
+      if (sup) supplierName = sup.name;
+    }
 
-    run(`
-      UPDATE medicines SET
-        name = ?, generic_name = ?, category = ?, batch_number = ?,
-        supplier_id = ?, purchase_price = ?, selling_price = ?, quantity = ?,
-        min_stock_level = ?, expiry_date = ?, dosage_form = ?, strength = ?,
-        location_shelf = ?, description = ?
-      WHERE id = ?
-    `, [
-      name, generic_name, category, batch_number,
-      supplier_id ? Number(supplier_id) : null,
-      Number(purchase_price), Number(selling_price), Number(quantity),
-      Number(min_stock_level), expiry_date, dosage_form, strength,
-      location_shelf, description, id
-    ]);
+    const updated = await Medicine.findByIdAndUpdate(
+      id,
+      {
+        ...req.body,
+        supplier_name: supplierName,
+        purchase_price: Number(req.body.purchase_price ?? medicine.purchase_price),
+        selling_price: Number(req.body.selling_price ?? medicine.selling_price),
+        quantity: Number(req.body.quantity ?? medicine.quantity),
+        min_stock_level: Number(req.body.min_stock_level ?? medicine.min_stock_level)
+      },
+      { new: true }
+    );
 
-    const updated = get('SELECT * FROM medicines WHERE id = ?', [id]);
     res.json(updated);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -204,13 +173,10 @@ router.put('/:id', (req, res) => {
 });
 
 // DELETE /api/medicines/:id
-router.delete('/:id', (req, res) => {
+router.delete('/:id', async (req, res) => {
   try {
-    const { id } = req.params;
-    const existing = get('SELECT id FROM medicines WHERE id = ?', [id]);
-    if (!existing) return res.status(404).json({ error: 'Medicine not found' });
-
-    run('DELETE FROM medicines WHERE id = ?', [id]);
+    const deleted = await Medicine.findByIdAndDelete(req.params.id);
+    if (!deleted) return res.status(404).json({ error: 'Medicine not found' });
     res.json({ message: 'Medicine deleted successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -218,4 +184,3 @@ router.delete('/:id', (req, res) => {
 });
 
 module.exports = router;
-

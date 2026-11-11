@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { get, run } = require('../db/database');
+const User = require('../models/User');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'pharmacy-secret-key-2026-satyam';
 
@@ -23,14 +23,14 @@ function authenticateToken(req, res, next) {
 }
 
 // POST /api/auth/login
-router.post('/login', (req, res) => {
+router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password are required' });
     }
 
-    const user = get('SELECT * FROM users WHERE email = ?', [email]);
+    const user = await User.findOne({ email: email.toLowerCase().trim() });
     if (!user) {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
@@ -41,7 +41,7 @@ router.post('/login', (req, res) => {
     }
 
     const token = jwt.sign(
-      { id: user.id, name: user.name, email: user.email, role: user.role },
+      { id: user._id.toString(), name: user.name, email: user.email, role: user.role },
       JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -50,7 +50,7 @@ router.post('/login', (req, res) => {
       message: 'Login successful',
       token,
       user: {
-        id: user.id,
+        id: user._id.toString(),
         name: user.name,
         email: user.email,
         role: user.role,
@@ -63,14 +63,14 @@ router.post('/login', (req, res) => {
 });
 
 // POST /api/auth/register
-router.post('/register', (req, res) => {
+router.post('/register', async (req, res) => {
   try {
     const { name, email, password, role = 'pharmacist', phone = '' } = req.body;
     if (!name || !email || !password) {
       return res.status(400).json({ error: 'Name, email, and password are required' });
     }
 
-    const existing = get('SELECT id FROM users WHERE email = ?', [email]);
+    const existing = await User.findOne({ email: email.toLowerCase().trim() });
     if (existing) {
       return res.status(400).json({ error: 'User with this email already exists' });
     }
@@ -78,18 +78,23 @@ router.post('/register', (req, res) => {
     const salt = bcrypt.genSaltSync(10);
     const hashedPassword = bcrypt.hashSync(password, salt);
 
-    const result = run(
-      'INSERT INTO users (name, email, password, role, phone) VALUES (?, ?, ?, ?, ?)',
-      [name, email, hashedPassword, role, phone]
-    );
-
-    const newUser = get('SELECT id, name, email, role, phone FROM users WHERE id = ?', [
-      Number(result.lastInsertRowid)
-    ]);
+    const newUser = await User.create({
+      name,
+      email: email.toLowerCase().trim(),
+      password: hashedPassword,
+      role,
+      phone
+    });
 
     res.status(201).json({
       message: 'User registered successfully',
-      user: newUser
+      user: {
+        id: newUser._id.toString(),
+        name: newUser.name,
+        email: newUser.email,
+        role: newUser.role,
+        phone: newUser.phone
+      }
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -97,15 +102,22 @@ router.post('/register', (req, res) => {
 });
 
 // GET /api/auth/me
-router.get('/me', authenticateToken, (req, res) => {
+router.get('/me', authenticateToken, async (req, res) => {
   try {
-    const user = get('SELECT id, name, email, role, phone FROM users WHERE id = ?', [req.user.id]);
+    const user = await User.findById(req.user.id).select('-password');
     if (!user) return res.status(404).json({ error: 'User not found' });
-    res.json({ user });
+    res.json({
+      user: {
+        id: user._id.toString(),
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        phone: user.phone
+      }
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 module.exports = { router, authenticateToken };
-

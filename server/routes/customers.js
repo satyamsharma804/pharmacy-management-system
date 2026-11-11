@@ -1,75 +1,82 @@
 const express = require('express');
 const router = express.Router();
-const { all, get, run } = require('../db/database');
+const Customer = require('../models/Customer');
+const Sale = require('../models/Sale');
 
-// GET /api/customers - List of customers with total purchases
-router.get('/', (req, res) => {
+// GET /api/customers
+router.get('/', async (req, res) => {
   try {
     const { search } = req.query;
-    let sql = `
-      SELECT c.*, 
-             COUNT(s.id) as total_orders, 
-             COALESCE(SUM(s.total_amount), 0) as total_spent
-      FROM customers c
-      LEFT JOIN sales s ON c.id = s.customer_id
-      WHERE 1=1
-    `;
-    const params = [];
+    const filter = {};
 
     if (search) {
-      sql += ` AND (c.name LIKE ? OR c.phone LIKE ? OR c.email LIKE ?)`;
-      const term = `%${search}%`;
-      params.push(term, term, term);
+      filter.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { phone: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } }
+      ];
     }
 
-    sql += ` GROUP BY c.id ORDER BY c.created_at DESC`;
+    const customers = await Customer.find(filter).sort({ createdAt: -1 });
 
-    const customers = all(sql, params);
-    res.json(customers);
+    const customersWithStats = await Promise.all(
+      customers.map(async (c) => {
+        const sales = await Sale.find({
+          $or: [{ customer: c._id }, { customer_phone: c.phone }]
+        });
+        const totalSpent = sales.reduce((sum, s) => sum + s.total_amount, 0);
+        const obj = c.toJSON();
+        obj.total_orders = sales.length;
+        obj.total_spent = parseFloat(totalSpent.toFixed(2));
+        return obj;
+      })
+    );
+
+    res.json(customersWithStats);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 // GET /api/customers/:id
-router.get('/:id', (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
-    const customer = get('SELECT * FROM customers WHERE id = ?', [req.params.id]);
+    const customer = await Customer.findById(req.params.id);
     if (!customer) return res.status(404).json({ error: 'Customer not found' });
 
-    const orders = all(`
-      SELECT s.*, 
-             (SELECT COUNT(*) FROM sale_items WHERE sale_id = s.id) as items_count
-      FROM sales s 
-      WHERE s.customer_id = ? 
-      ORDER BY s.created_at DESC
-    `, [req.params.id]);
+    const orders = await Sale.find({
+      $or: [{ customer: customer._id }, { customer_phone: customer.phone }]
+    }).sort({ createdAt: -1 });
 
-    res.json({ ...customer, orders });
+    const obj = customer.toJSON();
+    obj.orders = orders;
+    res.json(obj);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 // POST /api/customers
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   try {
     const { name, phone, email, address, allergies } = req.body;
     if (!name || !phone) {
       return res.status(400).json({ error: 'Customer name and phone number are required' });
     }
 
-    const existing = get('SELECT id FROM customers WHERE phone = ?', [phone]);
+    const existing = await Customer.findOne({ phone: phone.trim() });
     if (existing) {
       return res.status(400).json({ error: 'A customer with this phone number already exists' });
     }
 
-    const result = run(`
-      INSERT INTO customers (name, phone, email, address, allergies)
-      VALUES (?, ?, ?, ?, ?)
-    `, [name, phone, email || '', address || '', allergies || 'None']);
+    const created = await Customer.create({
+      name,
+      phone: phone.trim(),
+      email: email || '',
+      address: address || '',
+      allergies: allergies || 'None'
+    });
 
-    const created = get('SELECT * FROM customers WHERE id = ?', [Number(result.lastInsertRowid)]);
     res.status(201).json(created);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -77,27 +84,10 @@ router.post('/', (req, res) => {
 });
 
 // PUT /api/customers/:id
-router.put('/:id', (req, res) => {
+router.put('/:id', async (req, res) => {
   try {
-    const { id } = req.params;
-    const existing = get('SELECT * FROM customers WHERE id = ?', [id]);
-    if (!existing) return res.status(404).json({ error: 'Customer not found' });
-
-    const {
-      name = existing.name,
-      phone = existing.phone,
-      email = existing.email,
-      address = existing.address,
-      allergies = existing.allergies
-    } = req.body;
-
-    run(`
-      UPDATE customers SET
-        name = ?, phone = ?, email = ?, address = ?, allergies = ?
-      WHERE id = ?
-    `, [name, phone, email, address, allergies, id]);
-
-    const updated = get('SELECT * FROM customers WHERE id = ?', [id]);
+    const updated = await Customer.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    if (!updated) return res.status(404).json({ error: 'Customer not found' });
     res.json(updated);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -105,13 +95,10 @@ router.put('/:id', (req, res) => {
 });
 
 // DELETE /api/customers/:id
-router.delete('/:id', (req, res) => {
+router.delete('/:id', async (req, res) => {
   try {
-    const { id } = req.params;
-    const existing = get('SELECT id FROM customers WHERE id = ?', [id]);
-    if (!existing) return res.status(404).json({ error: 'Customer not found' });
-
-    run('DELETE FROM customers WHERE id = ?', [id]);
+    const deleted = await Customer.findByIdAndDelete(req.params.id);
+    if (!deleted) return res.status(404).json({ error: 'Customer not found' });
     res.json({ message: 'Customer record deleted successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -119,4 +106,3 @@ router.delete('/:id', (req, res) => {
 });
 
 module.exports = router;
-

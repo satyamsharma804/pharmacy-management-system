@@ -68,24 +68,45 @@
 |---|---|
 | **Frontend** | React 18, Vite, Tailwind CSS, Lucide React Icons, Recharts, Canvas Confetti |
 | **Backend API** | Node.js (v22), Express.js, RESTful Architecture, CORS, Multer |
-| **Database** | Embedded SQLite (Zero-config, self-contained, no external database server required) |
+| **Database** | MongoDB & Mongoose (Supports MongoDB Atlas in Cloud & Local MongoDB) |
 | **Authentication** | JWT (JSON Web Tokens), `bcryptjs` password hashing |
 | **Styling & UI** | Tailwind CSS with custom medical theme (Teal / Emerald palette), Print Media Styles |
 
 ---
 
-## 🚀 Quick Start Guide
+## ☁️ MongoDB Atlas Cloud Setup & Deployment
 
-### Prerequisites
-- **Node.js** (v18 or higher installed on your machine)
-- **npm** (comes with Node.js)
+To deploy on platforms like **Render**, **Railway**, or **Vercel**:
+
+1. **Get MongoDB Atlas URI**:
+   - Go to [MongoDB Atlas](https://www.mongodb.com/cloud/atlas).
+   - Create a free Shared Cluster (M0).
+   - In **Database Access**, create a user (e.g. `pharmacy_admin` with password).
+   - In **Network Access**, add IP `0.0.0.0/0` (allow access from anywhere for cloud deployment).
+   - Click **Connect** &rarr; **Drivers** &rarr; Copy the connection string:
+     `mongodb+srv://<username>:<password>@cluster0.mongodb.net/pharmacy_db?retryWrites=true&w=majority`
+
+2. **Set Environment Variable**:
+   - In your cloud hosting provider dashboard (Render, Railway, etc.), set:
+     - `MONGODB_URI` = your Atlas connection string.
+     - `JWT_SECRET` = your secret key.
+     - `PORT` = `5000` (or host provided).
+
+3. **Deploy Command**:
+   - Build command: `npm run build`
+   - Start command: `node server/server.js`
+
+---
+
+## 🚀 Quick Start Guide (Local)
 
 ### Running the Application
 
-1. **Start the Unified Server** (Serves both the REST API and the Frontend on Port 5000):
+1. **Start the Unified Server**:
    ```bash
    npm run server
    ```
+   *(Automatically connects to MongoDB Atlas if `MONGODB_URI` is set in `.env`, or falls back to local MongoDB `mongodb://127.0.0.1:27017/pharmacy_db`)*
 
 2. **Open in Your Browser**:
    Open [http://localhost:5000](http://localhost:5000)
