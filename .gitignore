@@ -6,3 +6,4 @@ server/db/pharmacy.db*
 .env
 .DS_Store
 Thumbs.db
+
