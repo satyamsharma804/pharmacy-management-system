@@ -8,8 +8,7 @@ import {
   ShieldCheck, 
   AlertTriangle, 
   Clock, 
-  Pill,
-  Sparkles
+  Pill
 } from 'lucide-react';
 
 export default function Navbar({ onNavigateAlerts }) {
@@ -63,15 +62,6 @@ export default function Navbar({ onNavigateAlerts }) {
             </div>
             <p className="text-xs text-slate-500">Pharmacy & Inventory Management</p>
           </div>
-        </div>
-
-        {/* Student Assignment Badge */}
-        <div className="hidden lg:flex items-center gap-2 rounded-lg bg-slate-100 px-3 py-1.5 text-xs text-slate-700 border border-slate-200/80">
-          <Sparkles className="h-3.5 w-3.5 text-amber-500" />
-          <span>Assignment: <strong>Full-Stack Web Dev</strong></span>
-          <span className="text-slate-300">|</span>
-          <span>By: <strong className="text-slate-900">Satyam Kumar</strong></span>
-          <span className="rounded bg-teal-100 text-teal-800 font-mono px-1.5 py-0.2 text-[11px] font-semibold">12314877</span>
         </div>
       </div>
 
