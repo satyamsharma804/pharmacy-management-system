@@ -1,4 +1,5 @@
-const BASE_URL = '/api';
+const rawApiUrl = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+const BASE_URL = rawApiUrl.endsWith('/api') ? rawApiUrl : (rawApiUrl ? `${rawApiUrl}/api` : '/api');
 
 export async function apiRequest(endpoint, options = {}) {
   const token = localStorage.getItem('pharma_token');
